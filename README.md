@@ -4,7 +4,7 @@
 
 LibreTest is an exam making and taking platform that is free and open source, under the Apache 2.0 License.
 
-This README is valid for version 0.1 of LibreTest.
+This README is valid for version 0.1.x of LibreTest.
 
 ## Features
 
