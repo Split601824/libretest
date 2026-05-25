@@ -121,22 +121,43 @@ function App() {
         selectedAnswer={selectedAnswer}
         onAnswerSelect={handleAnswerSelect}
       />
-      <button 
-        onClick={handleNext} 
-        disabled={selectedAnswer === null}
-        style={{ 
-          fontFamily: 'Roboto, sans-serif',
-          marginTop: '20px',
-          padding: '8px 16px',
-          cursor: selectedAnswer === null ? 'not-allowed' : 'pointer',
-          backgroundColor: selectedAnswer === null ? '#ccc' : '#2E7D32',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px'
-        }}
-      >
-        {currentIndex < exam.questions.length - 1 ? 'Next' : 'Submit'}
-      </button>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        gap: '10px', 
+        marginTop: '20px' 
+      }}>
+        <button 
+          onClick={() => setCurrentIndex(currentIndex - 1)} 
+          disabled={currentIndex === 0}
+          style={{ 
+            fontFamily: 'Roboto, sans-serif',
+            padding: '8px 16px',
+            cursor: currentIndex === 0 ? 'not-allowed' : 'pointer',
+            backgroundColor: currentIndex === 0 ? '#ccc' : '#2E7D32',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px'
+          }}
+        >
+          Previous
+        </button>
+        <button 
+          onClick={handleNext} 
+          disabled={selectedAnswer === null}
+          style={{ 
+            fontFamily: 'Roboto, sans-serif',
+            padding: '8px 16px',
+            cursor: selectedAnswer === null ? 'not-allowed' : 'pointer',
+            backgroundColor: selectedAnswer === null ? '#ccc' : '#2E7D32',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px'
+          }}
+        >
+          {currentIndex < exam.questions.length - 1 ? 'Next' : 'Submit'}
+        </button>
+      </div>
     </div>
   );
 }
