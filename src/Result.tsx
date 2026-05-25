@@ -5,7 +5,7 @@ interface ResultProps {
 export function Result({ onExit }: ResultProps) {
   return (
     <div style={{ fontFamily: 'Roboto, sans-serif', padding: '20px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
-      <h1 style={{ fontFamily: 'Roboto, sans-serif', color: 'black' }}>Submitted</h1>
+      <h1 style={{ fontFamily: 'Roboto, sans-serif', fontWeight: '700' }}>Submitted</h1>
       <p>This exam is complete. You may exit the exam now.</p>
       
       <h3>Reminders:</h3>
