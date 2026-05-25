@@ -14,7 +14,8 @@ function App() {
   const [timeLeft, setTimeLeft] = useState(360);
   const [timerActive, setTimerActive] = useState(true);
 
-  // Load exam from JSON file
+  const accentColor = '#15EB15';
+
   useEffect(() => {
     fetch('/exam.json?t=' + Date.now())
       .then((res) => {
@@ -32,7 +33,6 @@ function App() {
       });
   }, []);
 
-  // Timer logic
   useEffect(() => {
     if (!started || !timerActive) return;
     if (timeLeft <= 0) {
@@ -47,9 +47,9 @@ function App() {
     return () => clearInterval(timer);
   }, [started, timerActive, timeLeft]);
 
-  if (loading) return <div style={{ fontFamily: 'Roboto, sans-serif' }}>Loading exam...</div>;
-  if (error) return <div style={{ fontFamily: 'Roboto, sans-serif' }}>Error: {error}</div>;
-  if (!exam) return <div style={{ fontFamily: 'Roboto, sans-serif' }}>No exam loaded</div>;
+  if (loading) return <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>Loading exam...</div>;
+  if (error) return <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>Error: {error}</div>;
+  if (!exam) return <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>No exam loaded</div>;
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -57,24 +57,29 @@ function App() {
   // Start screen
   if (!started) {
     return (
-      <div style={{ fontFamily: 'Roboto, sans-serif', textAlign: 'center', marginTop: '50px' }}>
-        <h1>{exam.title}</h1>
-        <p>You will have {Math.floor(timeLeft / 60)} minutes to complete this exam.</p>
-        <button 
-          onClick={() => setStarted(true)} 
-          style={{ 
-            fontFamily: 'Roboto, sans-serif', 
-            padding: '10px 20px', 
-            fontSize: '16px', 
-            cursor: 'pointer',
-            backgroundColor: '#2E7D32',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px'
-          }}
-        >
-          Start Exam
-        </button>
+      <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
+        <div style={{ padding: '20px' }}>
+          <h1 style={{ margin: 0, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '16px', fontWeight: 'normal' }}>{exam.title}</h1>
+          <div style={{ height: '4px', backgroundColor: accentColor, marginTop: '8px', width: '100%' }} />
+        </div>
+        <div style={{ textAlign: 'center', marginTop: '50px' }}>
+          <p style={{ color: 'black' }}>You will have {Math.floor(timeLeft / 60)} minutes to complete this exam.</p>
+          <button 
+            onClick={() => setStarted(true)} 
+            style={{ 
+              fontFamily: 'Roboto, sans-serif', 
+              padding: '10px 20px', 
+              fontSize: '16px', 
+              cursor: 'pointer',
+              backgroundColor: accentColor,
+              color: 'black',
+              border: 'none',
+              borderRadius: '4px'
+            }}
+          >
+            Start Exam
+          </button>
+        </div>
       </div>
     );
   }
@@ -87,7 +92,6 @@ function App() {
     return <Result score={score} total={exam.questions.length} />;
   }
 
-  // Active test screen
   const currentQuestion = exam.questions[currentIndex];
   const selectedAnswer = answers[currentIndex];
 
@@ -105,57 +109,90 @@ function App() {
     }
   };
 
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+    }
+  };
+
   return (
-    <div style={{ fontFamily: 'Roboto, sans-serif' }}>
-      <div style={{ 
-        textAlign: 'center', 
-        marginBottom: '20px', 
-        fontWeight: 'bold', 
-        color: timeLeft <= 300 ? 'red' : 'black'
-      }}>
-        {minutes}:{seconds.toString().padStart(2, '0')}
+    <div style={{ 
+      fontFamily: 'Roboto, sans-serif',
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '100vh',
+      backgroundColor: 'white',
+      color: 'black'
+    }}>
+      {/* Header: Title top left, Timer top center, Green bar below */}
+      <div style={{ padding: '20px 20px 0 20px', position: 'relative' }}>
+  <div style={{ 
+    position: 'absolute', 
+    left: '20px', 
+    top: '20px',
+    fontSize: '16px', 
+    fontWeight: 'normal', 
+    fontFamily: 'Roboto, sans-serif',
+    color: 'black'
+  }}>
+    {exam.title}
+  </div>
+  <div style={{ 
+    textAlign: 'center',
+    fontSize: '17px', 
+    fontWeight: 'bold', 
+    fontFamily: 'Roboto, sans-serif',
+    color: timeLeft <= 300 ? 'red' : 'black'
+  }}>
+    {minutes}:{seconds.toString().padStart(2, '0')}
+  </div>
+  <div style={{ height: '4px', backgroundColor: accentColor, marginTop: '8px', width: '100%' }} />
+</div>
+
+      {/* Main content area */}
+      <div style={{ flex: 1, padding: '20px' }}>
+        <Question
+          question={currentQuestion}
+          selectedAnswer={selectedAnswer}
+          onAnswerSelect={handleAnswerSelect}
+        />
       </div>
-      <h1 style={{ fontFamily: 'Roboto, sans-serif' }}>{exam.title}</h1>
-      <Question
-        question={currentQuestion}
-        selectedAnswer={selectedAnswer}
-        onAnswerSelect={handleAnswerSelect}
-      />
+
+      {/* Navigation: Previous and Next at bottom */}
       <div style={{ 
         display: 'flex', 
-        justifyContent: 'center', 
-        gap: '10px', 
-        marginTop: '20px' 
+        justifyContent: 'space-between', 
+        padding: '20px',
+        borderTop: `1px solid ${accentColor}`,
+        backgroundColor: 'white'
       }}>
         <button 
-          onClick={() => setCurrentIndex(currentIndex - 1)} 
+          onClick={handlePrevious} 
           disabled={currentIndex === 0}
           style={{ 
             fontFamily: 'Roboto, sans-serif',
-            padding: '8px 16px',
+            fontSize: '16px',
             cursor: currentIndex === 0 ? 'not-allowed' : 'pointer',
-            backgroundColor: currentIndex === 0 ? '#ccc' : '#2E7D32',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px'
+            backgroundColor: 'transparent',
+            color: currentIndex === 0 ? '#ccc' : 'black',
+            border: 'none'
           }}
         >
-          Previous
+          ← Previous
         </button>
         <button 
           onClick={handleNext} 
           disabled={selectedAnswer === null}
           style={{ 
             fontFamily: 'Roboto, sans-serif',
-            padding: '8px 16px',
+            fontSize: '16px',
             cursor: selectedAnswer === null ? 'not-allowed' : 'pointer',
-            backgroundColor: selectedAnswer === null ? '#ccc' : '#2E7D32',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px'
+            backgroundColor: 'transparent',
+            color: selectedAnswer === null ? '#ccc' : 'black',
+            border: 'none'
           }}
         >
-          {currentIndex < exam.questions.length - 1 ? 'Next' : 'Submit'}
+          Next →
         </button>
       </div>
     </div>

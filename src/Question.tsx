@@ -7,11 +7,11 @@ interface QuestionProps {
 }
 
 const fontStyle = {
-  fontFamily: 'Roboto, sans-serif'
+  fontFamily: 'Roboto, sans-serif',
+  color: 'black'
 };
 
 export function Question({ question, selectedAnswer, onAnswerSelect }: QuestionProps) {
-  // Check if this is a True/False question
   const isTrueFalse = question.options.length === 2 && 
                       question.options[0] === 'True' && 
                       question.options[1] === 'False';
@@ -22,10 +22,8 @@ export function Question({ question, selectedAnswer, onAnswerSelect }: QuestionP
       {question.options.map((option: string, idx: number) => {
         let label;
         if (isTrueFalse) {
-          // For True/False, use the actual words
           label = option;
         } else {
-          // For regular MC, use A, B, C, D, etc.
           label = `${String.fromCharCode(65 + idx)}.`;
         }
         return (
