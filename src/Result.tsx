@@ -1,16 +1,12 @@
 interface ResultProps {
   score: number;
-  total: number;
+  maxScore: number;
 }
 
-const fontStyle = {
-  fontFamily: 'Roboto, sans-serif'
-};
-
-export function Result({ score, total }: ResultProps) {
+export function Result({ score, maxScore }: ResultProps) {
   return (
-    <div style={fontStyle}>
-      <h1 style={fontStyle}>Your score: {score} / {total}</h1>
+    <div style={{ fontFamily: 'Roboto, sans-serif', textAlign: 'center', marginTop: '50px' }}>
+      <h1 style={{ fontFamily: 'Roboto, sans-serif' }}>Your score: {score} / {maxScore}</h1>
     </div>
   );
 }
