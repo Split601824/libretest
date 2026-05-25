@@ -57,7 +57,7 @@ function App() {
   if (!exam) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <h2>LibreTest Player</h2>
+        <h2 style={{ fontFamily: 'Roboto, sans-serif', color: 'black' }}>LibreTest Player</h2>
         <input
           type="file"
           accept=".json"
@@ -106,15 +106,19 @@ function App() {
   }
 
   if (submitted) {
-    const score = answers.reduce((total, answer, idx) => {
-      if (answer === exam.questions[idx].correctAnswer) {
-        return total + exam.questions[idx].points;
-      }
-      return total;
-    }, 0);
-    const maxScore = exam.questions.reduce((total, q) => total + q.points, 0);
-    return <Result score={score} maxScore={maxScore} />;
-  }
+  return <Result onExit={() => {
+    // Reset everything to start screen
+    setStarted(false);
+    setSubmitted(false);
+    setExam(null);
+    setAnswers([]);
+    setCurrentIndex(0);
+    setTimeLeft(360);
+    setTimerActive(true);
+    setExamCode('');
+    setStudentName('');
+  }} />;
+}
 
   const currentQuestion = exam.questions[currentIndex];
   const selectedAnswer = answers[currentIndex];
