@@ -4,10 +4,10 @@ export interface Question {
   id: number;
   type: QuestionType;
   text: string;
-  options?: string[];      // only for mc
-  correctAnswer?: number;   // only for mc
+  options?: string[];
+  correctAnswer?: number;
   points: number;
-  rubric?: string;          // only for essay
+  rubric?: string;
 }
 
 export interface Exam {

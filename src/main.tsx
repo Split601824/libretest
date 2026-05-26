@@ -7,7 +7,7 @@ import './index.css';
 // Change this to 'studio' to test Studio
 const mode: 'player' | 'studio' = 'player';
 
-const App = mode === 'studio' ? AppPlayer : AppStudio;
+const App = mode === 'player' ? AppPlayer : AppStudio;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
