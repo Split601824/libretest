@@ -242,7 +242,6 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                     <tr>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Date</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Exam</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Score</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}></th>
                     </tr>
@@ -252,7 +251,6 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                       <tr key={exam.id}>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{new Date(exam.date).toLocaleDateString()}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.title}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.score}/{exam.maxScore}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                           <span style={{ 
                             backgroundColor: exam.status === 'marked' ? '#00b000' : '#ff9800',
