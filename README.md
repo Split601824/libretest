@@ -17,7 +17,7 @@ LibreTest is an independent open source project. It is not affiliated with:
 - ACT, Inc.
 - College Board
 - International Baccalaureate Organisation (IBO)
-- Any other foundation, exam board, or organization
+- Any other foundation, exam board, or organisation
 
 LibreTest is its own entity. The "Libre" prefix reflects the philosophy of free as in freedom, not affiliation with any organisation.
 
@@ -25,6 +25,8 @@ LibreTest is its own entity. The "Libre" prefix reflects the philosophy of free 
 
 - JSON exam making
 - Multiple choice exams
+- Essay question support
+- A home menu for LibreTest Player
 - Timed testing
 - Start button
 - Auto-submit on timeout
