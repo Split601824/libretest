@@ -4,7 +4,7 @@
 
 LibreTest is an exam making and taking platform that is free and open source, under the Apache 2.0 License.
 
-This README is valid for version 0.2.x of LibreTest.
+This README is valid for version 0.3.x of LibreTest.
 
 ## Disclaimer
 
@@ -21,14 +21,22 @@ LibreTest is an independent open source project. It is not affiliated with:
 
 LibreTest is its own entity. The "Libre" prefix reflects the philosophy of free as in freedom, not affiliation with any organisation.
 
+## Languages
+
+- English
+- Spanish
+
 ## Features
 
 - JSON exam making
+- Base Studio
+- Fully functioning Player (except results)
 - Multiple choice exams
 - Essay question support
 - A home menu for LibreTest Player
 - Timed testing
 - Start button
+- Pre-Start Screen
 - Auto-submit on timeout
 - Roboto font everywhere
 - More to come soon...
