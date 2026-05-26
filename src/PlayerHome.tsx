@@ -240,10 +240,10 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Date</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Exam</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}></th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Date</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Exam</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -252,15 +252,12 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{new Date(exam.date).toLocaleDateString()}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.title}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                          <span style={{ 
-                            backgroundColor: exam.status === 'marked' ? '#00b000' : '#ff9800',
-                            color: 'white',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px'
-                          }}>
+                        <span style={{
+                            color: 'black',
+                            fontSize: '16px'
+                        }}>
                             {exam.status === 'marked' ? 'Marked' : 'Unmarked'}
-                          </span>
+                        </span>
                         </td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                           <button style={{ padding: '4px 12px', cursor: 'pointer' }}>View</button>
@@ -273,9 +270,49 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             )}
           </div>
         )}
-
+        {/* Results Menu */}
         {activeTab === 'results' && <div>Results will appear here.</div>}
-        {activeTab === 'settings' && <div>Settings will appear here.</div>}
+
+        {/* Settings Menu */}
+        {activeTab === 'settings' && (
+  <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+    <h2 style={{ marginBottom: '20px', fontFamily: 'Roboto', color: '#000' }}>Settings</h2>
+    
+    <div style={{ marginBottom: '24px' }}>
+      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Language</label>
+      <select style={{ padding: '8px', width: '200px' }}>
+        <option>English</option>
+        <option>Spanish</option>
+        <option>French</option>
+      </select>
+    </div>
+    
+    <div style={{ marginBottom: '24px' }}>
+      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Time Format</label>
+      <select style={{ padding: '8px', width: '200px' }}>
+        <option>12-hour</option>
+        <option>24-hour</option>
+      </select>
+    </div>
+    
+    <div style={{ marginBottom: '24px' }}>
+      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Date Format</label>
+      <select style={{ padding: '8px', width: '200px' }}>
+        <option>MM/DD/YYYY</option>
+        <option>DD/MM/YYYY</option>
+        <option>YYYY-MM-DD</option>
+      </select>
+    </div>
+    
+    <div style={{ marginBottom: '24px' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <input type="checkbox" />
+        <span style={{ fontWeight: 'bold' }}>Dark Mode</span>
+      </label>
+      <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>Coming soon (white only for now)</p>
+    </div>
+  </div>
+)}
       </div>
 
       {/* Registry Code Modal */}
