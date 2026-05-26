@@ -11,11 +11,10 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [answers, setAnswers] = useState<(number | string)[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(3600);
-  const [warningThreshold, setWarningThreshold] = useState(300); // 5 minutes
+  const [warningThreshold] = useState(300); // 5 minutes
 
   useEffect(() => {
     setAnswers(new Array(exam.questions.length).fill(null));
-    // TODO: Read time limit from exam config
   }, [exam]);
 
   // Timer
@@ -26,7 +25,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          setSubmitted(true);
+          handleSubmit();
           return 0;
         }
         return prev - 1;
@@ -39,16 +38,92 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   // Auto-submit when time runs out
   useEffect(() => {
     if (timeLeft <= 0 && !submitted) {
-      setSubmitted(true);
+      handleSubmit();
     }
   }, [timeLeft, submitted]);
 
+  const calculateScore = () => {
+    let earnedPoints = 0;
+    let totalPoints = 0;
+
+    for (let i = 0; i < exam.questions.length; i++) {
+      const q = exam.questions[i];
+      totalPoints += q.points;
+      const answer = answers[i];
+
+      if (q.type === 'mc' && answer === q.correctAnswer) {
+        earnedPoints += q.points;
+      } else if (q.type === 'essay' && typeof answer === 'number') {
+        earnedPoints += answer;
+      }
+    }
+
+    return { earnedPoints, totalPoints };
+  };
+
+  const saveResult = () => {
+    const { earnedPoints, totalPoints } = calculateScore();
+    const pastExams = JSON.parse(localStorage.getItem('pastExams') || '[]');
+    pastExams.push({
+      id: Date.now().toString(),
+      title: exam.title,
+      subject: exam.title,
+      score: earnedPoints,
+      maxScore: totalPoints,
+      date: new Date().toISOString(),
+      status: 'unmarked'
+    });
+    localStorage.setItem('pastExams', JSON.stringify(pastExams));
+  };
+
+  const handleSubmit = () => {
+    saveResult();
+    setSubmitted(true);
+  };
+
   if (submitted) {
     return (
-      <div style={{ fontFamily: 'Roboto, sans-serif', textAlign: 'center', marginTop: '50px' }}>
-        <h1>Submitted</h1>
-        <p>This exam is complete. You may exit now.</p>
-        <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00b000', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Exit</button>
+      <div style={{ 
+        fontFamily: 'Roboto, sans-serif', 
+        backgroundColor: 'white', 
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: '20px'
+      }}>
+        <div style={{ maxWidth: '500px', width: '100%' }}>
+          <h1 style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 'bold', marginBottom: '16px', color: '#000' }}>Submitted</h1>
+          <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '24px', color: '#000' }}>
+            This exam is complete.<br />
+            Your device has been unlocked and you may exit.
+          </p>
+          
+          <h3 style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>Reminders:</h3>
+          <ul style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '32px', paddingLeft: '20px', color: '#000' }}>
+            <li>Do not distract candidates still testing.</li>
+            <li>Maintain integrity of the test at all times.</li>
+            <li>You may not return to this exam.</li>
+            <li>Your results will be calculated shortly.</li>
+          </ul>
+          
+          <button 
+            onClick={onComplete} 
+            style={{ 
+              fontFamily: 'Roboto, sans-serif',
+              padding: '10px 20px', 
+              backgroundColor: '#00b000', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer', 
+              fontWeight: 'bold' 
+            }}
+          >
+            Exit
+          </button>
+        </div>
       </div>
     );
   }
@@ -69,7 +144,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     if (currentIndex < exam.questions.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
-      setSubmitted(true);
+      handleSubmit();
     }
   };
 
@@ -88,7 +163,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
           <div style={{ fontSize: isWarning ? '20px' : '18px', fontWeight: 'bold', color: isWarning ? '#ffcccc' : 'white' }}>
-            Time: {minutes}:{seconds.toString().padStart(2, '0')}
+            {minutes}:{seconds.toString().padStart(2, '0')}
           </div>
           <div style={{ fontSize: '14px', color: 'white' }}>
             Question {currentIndex + 1} of {exam.questions.length}

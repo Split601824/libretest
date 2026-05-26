@@ -10,6 +10,16 @@ interface ExamCard {
   examData?: any;
 }
 
+interface PastExam {
+  id: string;
+  title: string;
+  subject: string;
+  score: number;
+  maxScore: number;
+  date: string;
+  status: 'marked' | 'unmarked';
+}
+
 interface PlayerHomeProps {
   onStartExam: (examId: string, examData?: any) => void;
   onRegistryCode: (code: string) => void;
@@ -23,12 +33,21 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
   const [importedExams, setImportedExams] = useState<ExamCard[]>([]);
   const [now, setNow] = useState(new Date());
   const [showAllTests, setShowAllTests] = useState(false);
+  const [pastExams, setPastExams] = useState<PastExam[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Load past exams from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('pastExams');
+    if (stored) {
+      setPastExams(JSON.parse(stored));
+    }
   }, []);
 
   const formattedDate = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -177,9 +196,9 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             {/* Right side - Welcome and actions */}
             <div style={{ flex: 1, minWidth: '280px' }}>
               <div style={{ marginBottom: '32px' }}>
-                <h1 style={{ fontFamily: 'Roboto', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>Welcome to LibreTest Player</h1>
-                <p style={{ color: '#000' }}>An open testing platform.</p>
-                <p style={{ color: '#000' }}>Take your exams here, or import one.</p>
+                <h1 style={{ fontFamily: 'Roboto', fontSize: '22px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>Welcome to LibreTest Player</h1>
+                <p style={{ color: '#666' }}>An open testing platform.</p>
+                <p style={{ color: '#666' }}>Take your exams here, or import one.</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '32px' }}>
@@ -209,7 +228,54 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
           </div>
         )}
 
-        {activeTab === 'past' && <div>Past exams will appear here.</div>}
+        {activeTab === 'past' && (
+          <div>
+            {pastExams.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                No past exams yet. Complete an exam to see it here.
+              </div>
+            ) : (
+              <>
+                <h2 style={{ fontFamily: 'Roboto', marginBottom: '20px', color: '#000' }}>Past Exams</h2>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Date</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Exam</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Score</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pastExams.map((exam) => (
+                      <tr key={exam.id}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{new Date(exam.date).toLocaleDateString()}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.title}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.score}/{exam.maxScore}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                          <span style={{ 
+                            backgroundColor: exam.status === 'marked' ? '#00b000' : '#ff9800',
+                            color: 'white',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px'
+                          }}>
+                            {exam.status === 'marked' ? 'Marked' : 'Unmarked'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                          <button style={{ padding: '4px 12px', cursor: 'pointer' }}>View</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
+
         {activeTab === 'results' && <div>Results will appear here.</div>}
         {activeTab === 'settings' && <div>Settings will appear here.</div>}
       </div>
