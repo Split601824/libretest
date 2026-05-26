@@ -177,9 +177,9 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             {/* Right side - Welcome and actions */}
             <div style={{ flex: 1, minWidth: '280px' }}>
               <div style={{ marginBottom: '32px' }}>
-                <h1 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '8px' }}>Welcome to LibreTest Player</h1>
-                <p style={{ color: '#666' }}>An open testing platform.</p>
-                <p style={{ color: '#666' }}>Take your exams here, or import one.</p>
+                <h1 style={{ fontFamily: 'Roboto', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>Welcome to LibreTest Player</h1>
+                <p style={{ color: '#000' }}>An open testing platform.</p>
+                <p style={{ color: '#000' }}>Take your exams here, or import one.</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '32px' }}>
