@@ -20,10 +20,92 @@ interface PastExam {
   status: 'marked' | 'unmarked';
 }
 
+interface Settings {
+  language: string;
+  timeFormat: string;
+  dateFormat: string;
+  darkMode: boolean;
+}
+
 interface PlayerHomeProps {
   onStartExam: (examId: string, examData?: any) => void;
   onRegistryCode: (code: string) => void;
 }
+
+const translations: Record<string, Record<string, string>> = {
+  en: {
+    home: 'Home',
+    past: 'Past',
+    results: 'Results',
+    settings: 'Settings',
+    welcome: 'Welcome to LibreTest Player',
+    openPlatform: 'An open testing platform.',
+    takeExamsHere: 'Take your exams here, or import one.',
+    enterCode: 'Enter Exam Code',
+    importJSON: 'Import Exam (JSON)',
+    digitizePDF: 'Digitize Exam (PDF)',
+    advice: 'Advice',
+    tip1: 'Eliminate answers that are obviously wrong.',
+    tip2: 'You can save your exam anytime with Ctrl + S.',
+    tip3: 'Watch the clock. Do not spend too much time on an item.',
+    tip4: 'For free-response questions, plan your response first.',
+    moreTests: 'More Tests →',
+    showLess: 'Show Less',
+    attemptRemaining: 'attempt(s) remaining',
+    start: 'Start →',
+    notOpen: 'Not Open',
+    marked: 'Marked',
+    unmarked: 'Unmarked',
+    pastExams: 'Past Exams',
+    noPastExams: 'No past exams yet. Complete an exam to see it here.',
+    settingsTitle: 'Settings',
+    language: 'Language',
+    timeFormatLabel: 'Time Format',
+    dateFormatLabel: 'Date Format',
+    darkModeLabel: 'Dark Mode',
+    comingSoon: 'Coming soon (white only for now)',
+    date: 'Date',
+    exam: 'Exam',
+    status: 'Status',
+    view: 'View'
+  },
+  es: {
+    home: 'Inicio',
+    past: 'Pasado',
+    results: 'Resultados',
+    settings: 'Configuración',
+    welcome: 'Bienvenido a LibreTest Player',
+    openPlatform: 'Una plataforma de evaluación abierta.',
+    takeExamsHere: 'Toma tus exámenes aquí o importa uno.',
+    enterCode: 'Ingresar Código de Examen',
+    importJSON: 'Importar Examen (JSON)',
+    digitizePDF: 'Digitalizar Examen (PDF)',
+    advice: 'Consejos',
+    tip1: 'Elimina respuestas que son obviamente incorrectas.',
+    tip2: 'Puedes guardar tu examen en cualquier momento con Ctrl + S.',
+    tip3: 'Mira el reloj. No pases demasiado tiempo en una pregunta.',
+    tip4: 'Para respuestas de desarrollo libre, planifica tu respuesta primero.',
+    moreTests: 'Más Exámenes →',
+    showLess: 'Mostrar Menos',
+    attemptRemaining: 'intento(s) restante(s)',
+    start: 'Iniciar →',
+    notOpen: 'No Disponible',
+    marked: 'Calificado',
+    unmarked: 'Sin Calificar',
+    pastExams: 'Exámenes Anteriores',
+    noPastExams: 'No hay exámenes anteriores. Completa un examen para verlo aquí.',
+    settingsTitle: 'Configuración',
+    language: 'Idioma',
+    timeFormatLabel: 'Formato de Hora',
+    dateFormatLabel: 'Formato de Fecha',
+    darkModeLabel: 'Modo Oscuro',
+    comingSoon: 'Próximamente (solo blanco por ahora)',
+    date: 'Fecha',
+    exam: 'Examen',
+    status: 'Estado',
+    view: 'Ver'
+  }
+};
 
 export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
   const [activeTab, setActiveTab] = useState<'home' | 'past' | 'results' | 'settings'>('home');
@@ -34,6 +116,12 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
   const [now, setNow] = useState(new Date());
   const [showAllTests, setShowAllTests] = useState(false);
   const [pastExams, setPastExams] = useState<PastExam[]>([]);
+  const [settings, setSettings] = useState<Settings>({
+    language: 'en',
+    timeFormat: '24',
+    dateFormat: 'MM/DD/YYYY',
+    darkMode: false
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,16 +130,48 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
     return () => clearInterval(timer);
   }, []);
 
-  // Load past exams from localStorage
+  // Load settings and past exams from localStorage
   useEffect(() => {
+    const savedSettings = localStorage.getItem('libretest_settings');
+    if (savedSettings) {
+      setSettings(JSON.parse(savedSettings));
+    }
     const stored = localStorage.getItem('pastExams');
     if (stored) {
       setPastExams(JSON.parse(stored));
     }
   }, []);
 
-  const formattedDate = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const t = translations[settings.language] || translations.en;
+
+  const getFormattedDate = () => {
+    const date = now;
+    switch (settings.dateFormat) {
+      case 'MM/DD/YYYY':
+        return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+      case 'DD/MM/YYYY':
+        return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+      case 'YYYY-MM-DD':
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      default:
+        return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+    }
+  };
+
+  const getFormattedTime = () => {
+    if (settings.timeFormat === '12') {
+      return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    } else {
+      return now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    }
+  };
+
+  const updateSetting = (key: string, value: any) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+    localStorage.setItem('libretest_settings', JSON.stringify(newSettings));
+  };
+
   const batteryPlaceholder = '--%';
 
   const placeholderExams: ExamCard[] = [
@@ -136,13 +256,13 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
           <div style={{ display: 'flex', gap: '48px' }}>
-            <button onClick={() => setActiveTab('home')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'home' ? 700 : 400, color: 'white' }}>Home</button>
-            <button onClick={() => setActiveTab('past')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'past' ? 700 : 400, color: 'white' }}>Past</button>
-            <button onClick={() => setActiveTab('results')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'results' ? 700 : 400, color: 'white' }}>Results</button>
-            <button onClick={() => setActiveTab('settings')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'settings' ? 700 : 400, color: 'white' }}>Settings</button>
+            <button onClick={() => setActiveTab('home')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'home' ? 700 : 400, color: 'white' }}>{t.home}</button>
+            <button onClick={() => setActiveTab('past')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'past' ? 700 : 400, color: 'white' }}>{t.past}</button>
+            <button onClick={() => setActiveTab('results')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'results' ? 700 : 400, color: 'white' }}>{t.results}</button>
+            <button onClick={() => setActiveTab('settings')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'settings' ? 700 : 400, color: 'white' }}>{t.settings}</button>
           </div>
           <div style={{ fontSize: '14px', color: 'white' }}>
-            {formattedDate} {formattedTime} {batteryPlaceholder}
+            {getFormattedDate()} | {getFormattedTime()} | 🔋 {batteryPlaceholder}
           </div>
         </div>
       </div>
@@ -167,9 +287,9 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                       Close: {exam.closeDate.toLocaleString()}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '12px' }}>{exam.attemptsRemaining} attempt(s) remaining</span>
+                      <span style={{ fontSize: '12px' }}>{exam.attemptsRemaining} {t.attemptRemaining}</span>
                       <button onClick={() => open && handleLocalStartExam(exam)} disabled={!open} style={{ padding: '8px 16px', backgroundColor: open ? '#00b000' : '#ccc', color: 'white', border: 'none', borderRadius: '4px', cursor: open ? 'pointer' : 'not-allowed', fontWeight: 'bold' }}>
-                        {open ? 'Start →' : 'Not Open'}
+                        {open ? t.start : t.notOpen}
                       </button>
                     </div>
                   </div>
@@ -179,7 +299,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
               {hasMoreTests && !showAllTests && (
                 <div style={{ textAlign: 'center', marginTop: '16px' }}>
                   <button onClick={() => setShowAllTests(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#00b000', fontSize: '14px' }}>
-                    More Tests →
+                    {t.moreTests}
                   </button>
                 </div>
               )}
@@ -187,7 +307,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
               {showAllTests && allExams.length > 2 && (
                 <div style={{ textAlign: 'center', marginTop: '16px' }}>
                   <button onClick={() => setShowAllTests(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#00b000', fontSize: '14px' }}>
-                    Show Less
+                    {t.showLess}
                   </button>
                 </div>
               )}
@@ -196,32 +316,32 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             {/* Right side - Welcome and actions */}
             <div style={{ flex: 1, minWidth: '280px' }}>
               <div style={{ marginBottom: '32px' }}>
-                <h1 style={{ fontFamily: 'Roboto', fontSize: '22px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>Welcome to LibreTest Player</h1>
-                <p style={{ color: '#666' }}>An open testing platform.</p>
-                <p style={{ color: '#666' }}>Take your exams here, or import one.</p>
+                <h1 style={{ fontFamily: 'Roboto', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>{t.welcome}</h1>
+                <p style={{ color: '#666' }}>{t.openPlatform}</p>
+                <p style={{ color: '#666' }}>{t.takeExamsHere}</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '32px' }}>
                 <button onClick={() => setShowRegistryModal(true)} style={{ padding: '12px 16px', backgroundColor: '#00b000', border: 'none', borderRadius: '4px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', fontWeight: 'bold', color: 'white' }}>
-                  Enter Exam Code
+                  {t.enterCode}
                 </button>
                 <button onClick={() => fileInputRef.current?.click()} style={{ padding: '12px 16px', backgroundColor: '#00b000', border: 'none', borderRadius: '4px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', fontWeight: 'bold', color: 'white' }}>
-                  Import Exam (JSON)
+                  {t.importJSON}
                 </button>
                 <button onClick={() => setShowDigitizeModal(true)} style={{ padding: '12px 16px', backgroundColor: '#00b000', border: 'none', borderRadius: '4px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', fontWeight: 'bold', color: 'white' }}>
-                  Digitize Exam (PDF)
+                  {t.digitizePDF}
                 </button>
               </div>
               <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportJSONFile} />
               <input ref={pdfInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleDigitizePDFFile} />
 
               <div style={{ backgroundColor: '#f9f9f9', padding: '16px', borderRadius: '8px', borderLeft: `4px solid #00b000` }}>
-                <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>Advice</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>{t.advice}</h3>
                 <ol style={{ margin: 0, paddingLeft: '20px', color: '#555', fontSize: '13px', lineHeight: '1.6' }}>
-                  <li>Eliminate answers that are obviously wrong.</li>
-                  <li>You can save your exam anytime with Ctrl + S.</li>
-                  <li>Watch the clock. Do not spend too much time on an item.</li>
-                  <li>For free-response questions, plan your response first.</li>
+                  <li>{t.tip1}</li>
+                  <li>{t.tip2}</li>
+                  <li>{t.tip3}</li>
+                  <li>{t.tip4}</li>
                 </ol>
               </div>
             </div>
@@ -232,35 +352,34 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
           <div>
             {pastExams.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-                No past exams yet. Complete an exam to see it here.
+                {t.noPastExams}
               </div>
             ) : (
               <>
-                <h2 style={{ fontFamily: 'Roboto', marginBottom: '20px', color: '#000' }}>Past Exams</h2>
+                <h2 style={{ marginBottom: '20px' }}>{t.pastExams}</h2>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Date</th>
-                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Exam</th>
-                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>{t.date}</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>{t.exam}</th>
+                      <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}>{t.status}</th>
                       <th style={{ textAlign: 'center', padding: '8px', borderBottom: '1px solid #ddd' }}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {pastExams.map((exam) => (
                       <tr key={exam.id}>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{new Date(exam.date).toLocaleDateString()}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{exam.title}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        <span style={{
-                            color: 'black',
-                            fontSize: '16px'
-                        }}>
-                            {exam.status === 'marked' ? 'Marked' : 'Unmarked'}
-                        </span>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'center' }}>{new Date(exam.date).toLocaleDateString()}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'center' }}>{exam.title}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                          {exam.status === 'marked' ? (
+                            <span style={{ backgroundColor: '#00b000', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>{t.marked}</span>
+                          ) : (
+                            <span style={{ color: '#666' }}>{t.unmarked}</span>
+                          )}
                         </td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                          <button style={{ padding: '4px 12px', cursor: 'pointer' }}>View</button>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                          <button style={{ padding: '4px 12px', cursor: 'pointer' }}>{t.view}</button>
                         </td>
                       </tr>
                     ))}
@@ -270,60 +389,73 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             )}
           </div>
         )}
-        {/* Results Menu */}
-        {activeTab === 'results' && <div>Results will appear here.</div>}
 
-        {/* Settings Menu */}
+        {activeTab === 'results' && <div>{t.results} will appear here.</div>}
+
         {activeTab === 'settings' && (
-  <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-    <h2 style={{ marginBottom: '20px', fontFamily: 'Roboto', color: '#000' }}>Settings</h2>
-    
-    <div style={{ marginBottom: '24px' }}>
-      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Language</label>
-      <select style={{ padding: '8px', width: '200px' }}>
-        <option>English</option>
-        <option>Spanish</option>
-        <option>French</option>
-      </select>
-    </div>
-    
-    <div style={{ marginBottom: '24px' }}>
-      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Time Format</label>
-      <select style={{ padding: '8px', width: '200px' }}>
-        <option>12-hour</option>
-        <option>24-hour</option>
-      </select>
-    </div>
-    
-    <div style={{ marginBottom: '24px' }}>
-      <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Date Format</label>
-      <select style={{ padding: '8px', width: '200px' }}>
-        <option>MM/DD/YYYY</option>
-        <option>DD/MM/YYYY</option>
-        <option>YYYY-MM-DD</option>
-      </select>
-    </div>
-    
-    <div style={{ marginBottom: '24px' }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <input type="checkbox" />
-        <span style={{ fontWeight: 'bold' }}>Dark Mode</span>
-      </label>
-      <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>Coming soon (white only for now)</p>
-    </div>
-  </div>
-)}
+          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+            <h2 style={{ fontFamily: 'Roboto', color: '#000', }}>{t.settingsTitle}</h2>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>{t.language}</label>
+              <select 
+                value={settings.language}
+                onChange={(e) => updateSetting('language', e.target.value)}
+                style={{ padding: '8px', width: '200px' }}
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>{t.timeFormatLabel}</label>
+              <select 
+                value={settings.timeFormat}
+                onChange={(e) => updateSetting('timeFormat', e.target.value)}
+                style={{ padding: '8px', width: '200px' }}
+              >
+                <option value="12">12-hour</option>
+                <option value="24">24-hour</option>
+              </select>
+            </div>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>{t.dateFormatLabel}</label>
+              <select 
+                value={settings.dateFormat}
+                onChange={(e) => updateSetting('dateFormat', e.target.value)}
+                style={{ padding: '8px', width: '200px' }}
+              >
+                <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+              </select>
+            </div>
+            
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input 
+                  type="checkbox" 
+                  checked={settings.darkMode}
+                  onChange={(e) => updateSetting('darkMode', e.target.checked)}
+                />
+                <span>{t.darkModeLabel} ({t.comingSoon})</span>
+              </label>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Registry Code Modal */}
       {showRegistryModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', minWidth: '300px' }}>
-            <h3 style={{ marginBottom: '16px' }}>Enter Exam Code</h3>
+            <h3 style={{ marginBottom: '16px' }}>{t.enterCode}</h3>
             <input type="text" value={registryCodeInput} onChange={(e) => setRegistryCodeInput(e.target.value.toUpperCase())} placeholder="XXX-XXX-XXX" style={{ width: '100%', padding: '8px', marginBottom: '16px', fontFamily: 'monospace' }} />
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button onClick={() => setShowRegistryModal(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleRegistrySubmit} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#00b000', color: 'white', border: 'none', borderRadius: '4px' }}>Start</button>
+              <button onClick={handleRegistrySubmit} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#00b000', color: 'white', border: 'none', borderRadius: '4px' }}>{t.start}</button>
             </div>
           </div>
         </div>
@@ -333,7 +465,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
       {showDigitizeModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', minWidth: '300px' }}>
-            <h3 style={{ marginBottom: '8px' }}>Digitize Exam (PDF)</h3>
+            <h3 style={{ marginBottom: '8px' }}>{t.digitizePDF}</h3>
             <p style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>Upload a PDF to convert to a digital test.</p>
             <input type="file" accept=".pdf" onChange={handleDigitizePDFFile} style={{ width: '100%', marginBottom: '16px' }} />
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>

@@ -10,6 +10,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<(number | string)[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [examStarted, setExamStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(3600);
   const [warningThreshold] = useState(300); // 5 minutes
 
@@ -19,7 +20,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
 
   // Timer
   useEffect(() => {
-    if (submitted) return;
+    if (!examStarted || submitted) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -33,14 +34,14 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [submitted]);
+  }, [examStarted, submitted]);
 
   // Auto-submit when time runs out
   useEffect(() => {
-    if (timeLeft <= 0 && !submitted) {
+    if (timeLeft <= 0 && !submitted && examStarted) {
       handleSubmit();
     }
-  }, [timeLeft, submitted]);
+  }, [timeLeft, submitted, examStarted]);
 
   const calculateScore = () => {
     let earnedPoints = 0;
@@ -80,6 +81,54 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     saveResult();
     setSubmitted(true);
   };
+
+  // Start Screen
+  if (!examStarted) {
+    return (
+      <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
+        {/* Green top bar */}
+        <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ fontSize: '20px', color: 'white' }}>
+              <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
+            </div>
+            <div style={{ fontSize: '14px', color: 'white' }}>
+              {/* Empty for alignment */}
+            </div>
+            <div style={{ fontSize: '14px', color: 'white' }}>
+              {/* Empty for alignment */}
+            </div>
+          </div>
+        </div>
+
+        {/* Start screen content */}
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '40px 20px', minHeight: 'calc(100vh - 60px)' }}>
+          <div style={{ textAlign: 'center', maxWidth: '500px' }}>
+            <h1 style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 'bold', marginBottom: '16px', color: '#000' }}>{exam.title}</h1>
+            <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '24px' }}>
+              You will have {Math.floor(timeLeft / 60)} minutes to complete this exam.
+            </p>
+            <button 
+              onClick={() => setExamStarted(true)} 
+              style={{ 
+                fontFamily: 'Roboto, sans-serif',
+                padding: '12px 24px', 
+                backgroundColor: '#00b000', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}
+            >
+              Start Exam
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
