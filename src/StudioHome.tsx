@@ -70,8 +70,7 @@ export function StudioHome() {
             {/* Left side - Exam cards */}
             <div style={{ flex: 2, minWidth: '300px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>Recent Exams</h2>
-                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontFamily: 'Roboto, sans-serif' }}>Create New Exam</button>
+                <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>Recent Exams</h2>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
@@ -83,9 +82,9 @@ export function StudioHome() {
                     backgroundColor: 'white',
                     cursor: 'pointer'
                   }}>
-                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px', fontFamily: 'Roboto, sans-serif' }}>{exam.subject}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'black', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>{exam.title}</div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>{exam.subject}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'black', marginBottom: '16px', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>{exam.title}</div>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
                       <button style={{ 
                         padding: '8px 16px', 
                         backgroundColor: accentColor, 
@@ -123,26 +122,26 @@ export function StudioHome() {
             {/* Right side - Actions */}
             <div style={{ flex: 1, minWidth: '280px' }}>
               <div style={{ marginBottom: '32px' }}>
-                <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'black', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>Actions</h2>
+                <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'black', marginBottom: '16px', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>Actions</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <button style={{ padding: '12px 16px', backgroundColor: '#f5f5f5', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', textAlign: 'left', fontSize: '14px', color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                  <button style={{ padding: '12px 16px', backgroundColor: accentColor, border: 'none', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', color: 'white', fontFamily: 'Roboto, sans-serif', fontWeight: 'bold' }}>
                     New Question Bank
                   </button>
-                  <button style={{ padding: '12px 16px', backgroundColor: '#f5f5f5', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', textAlign: 'left', fontSize: '14px', color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                  <button style={{ padding: '12px 16px', backgroundColor: accentColor, border: 'none', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', color: 'white', fontFamily: 'Roboto, sans-serif', fontWeight: 'bold' }}>
                     Create New Exam
                   </button>
-                  <button style={{ padding: '12px 16px', backgroundColor: '#f5f5f5', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', textAlign: 'left', fontSize: '14px', color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                  <button style={{ padding: '12px 16px', backgroundColor: accentColor, border: 'none', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', color: 'white', fontFamily: 'Roboto, sans-serif', fontWeight: 'bold' }}>
                     Digitize Exam (PDF)
                   </button>
-                  <button style={{ padding: '12px 16px', backgroundColor: '#f5f5f5', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', textAlign: 'left', fontSize: '14px', color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                  <button style={{ padding: '12px 16px', backgroundColor: accentColor, border: 'none', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontSize: '14px', color: 'white', fontFamily: 'Roboto, sans-serif', fontWeight: 'bold' }}>
                     Import Exam (JSON)
                   </button>
                 </div>
               </div>
 
               <div style={{ backgroundColor: '#f9f9f9', padding: '16px', borderRadius: '8px', borderLeft: `4px solid ${accentColor}` }}>
-                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'black', marginBottom: '8px', fontFamily: 'Roboto, sans-serif' }}>Tip</h3>
-                <p style={{ fontSize: '13px', color: '#555', lineHeight: '1.5', fontFamily: 'Roboto, sans-serif' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'black', marginBottom: '8px', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>Tip</h3>
+                <p style={{ fontSize: '13px', color: '#555', lineHeight: '1.5', fontFamily: 'Roboto, sans-serif', textAlign: 'center' }}>
                   Create a question bank first to reuse questions across multiple exams.
                 </p>
               </div>
