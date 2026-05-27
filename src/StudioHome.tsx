@@ -20,10 +20,8 @@ interface Question {
   text: string;
   points: number;
   tags: string[];
-  // MCQ fields
   correctOptions?: string[];
   incorrectOptions?: string[];
-  // Written Response fields
   limits?: WrittenResponseLimits;
 }
 
@@ -66,6 +64,15 @@ const placeholderBanks: QuestionBank[] = [
         tags: ['series'],
         limits: { mode: 'both', min: 100, max: 500 }
       },
+      { 
+        id: 'q3', 
+        type: 'MCQ', 
+        text: 'What is the derivative of ln(x)?', 
+        correctOptions: ['1/x'], 
+        incorrectOptions: ['x', 'ln(x)', 'e^x'],
+        points: 2, 
+        tags: ['derivatives', 'logarithms'] 
+      },
     ],
     createdAt: Date.now(),
   },
@@ -75,7 +82,7 @@ const placeholderBanks: QuestionBank[] = [
     description: 'Reconstruction to present',
     questions: [
       { 
-        id: 'q3', 
+        id: 'q4', 
         type: 'MCQ', 
         text: 'The 19th Amendment granted voting rights to whom?', 
         correctOptions: ['Women'], 
@@ -92,7 +99,7 @@ const placeholderBanks: QuestionBank[] = [
     description: 'Thermodynamics, kinetics, equilibrium',
     questions: [
       { 
-        id: 'q4', 
+        id: 'q5', 
         type: 'MCQ', 
         text: 'Which of the following is a strong acid?', 
         correctOptions: ['HCl'], 
@@ -101,7 +108,7 @@ const placeholderBanks: QuestionBank[] = [
         tags: ['acids', 'bases'] 
       },
       {
-        id: 'q5',
+        id: 'q6',
         type: 'WRITTEN',
         text: 'Describe the relationship between Gibbs free energy and reaction spontaneity.',
         points: 4,
@@ -143,22 +150,26 @@ const placeholderStandaloneQuestions: Question[] = [
 const accentColor = '#00c462';
 const deleteColor = '#cc0000';
 
+type ViewMode = 'bank-list' | 'bank-editor' | 'standalone-editor';
+
 export function StudioHome() {
-  const [activeTab, setActiveTab] = useState<'home' | 'admin' | 'questions' | 'exams' | 'scoring' | 'settings'>('home');
-  const [questionsSubTab, setQuestionsSubTab] = useState<'banks' | 'standalone'>('banks');
+  const [activeTab, setActiveTab] = useState<'home' | 'admin' | 'questions' | 'exams' | 'scoring' | 'settings'>('questions');
   const [now, setNow] = useState(new Date());
   const [showAll, setShowAll] = useState(false);
   
   const [banks, setBanks] = useState<QuestionBank[]>(placeholderBanks);
   const [standaloneQuestions, setStandaloneQuestions] = useState<Question[]>(placeholderStandaloneQuestions);
+  
+  const [viewMode, setViewMode] = useState<ViewMode>('bank-list');
   const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [showBankDialog, setShowBankDialog] = useState(false);
   const [editingBank, setEditingBank] = useState<QuestionBank | null>(null);
-  const [showQuestionDialog, setShowQuestionDialog] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<{ source: 'bank' | 'standalone'; bankId?: string; question: Question | null } | null>(null);
-  const [questionType, setQuestionType] = useState<QuestionType>('MCQ');
   const [searchQuery, setSearchQuery] = useState('');
   const [tagFilter, setTagFilter] = useState('');
+  
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [isNewQuestion, setIsNewQuestion] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -182,14 +193,10 @@ export function StudioHome() {
   });
 
   const selectedBank = banks.find(b => b.id === selectedBankId);
+  const currentQuestions = viewMode === 'standalone-editor' ? standaloneQuestions : (selectedBank?.questions || []);
+  const selectedQuestion = currentQuestions.find(q => q.id === selectedQuestionId);
   
-  const filteredBankQuestions = selectedBank?.questions.filter(q => {
-    const matchesSearch = searchQuery === '' || q.text.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesTag = tagFilter === '' || q.tags.some(t => t.toLowerCase().includes(tagFilter.toLowerCase()));
-    return matchesSearch && matchesTag;
-  }) || [];
-
-  const filteredStandaloneQuestions = standaloneQuestions.filter(q => {
+  const filteredQuestions = currentQuestions.filter(q => {
     const matchesSearch = searchQuery === '' || q.text.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTag = tagFilter === '' || q.tags.some(t => t.toLowerCase().includes(tagFilter.toLowerCase()));
     return matchesSearch && matchesTag;
@@ -216,59 +223,98 @@ export function StudioHome() {
   const handleDeleteBank = (id: string) => {
     if (confirm('Delete this bank and all its questions?')) {
       setBanks(banks.filter(b => b.id !== id));
-      if (selectedBankId === id) setSelectedBankId(null);
+      if (selectedBankId === id) {
+        setViewMode('bank-list');
+        setSelectedBankId(null);
+        setSelectedQuestionId(null);
+      }
     }
   };
 
-  const handleSaveQuestion = (
-    source: 'bank' | 'standalone', 
-    bankId: string | undefined, 
-    question: Omit<Question, 'id'>
-  ) => {
-    if (source === 'standalone') {
-      if (editingQuestion?.question) {
-        setStandaloneQuestions(standaloneQuestions.map(q => 
-          q.id === editingQuestion.question!.id ? { ...question, id: q.id } : q
-        ));
-      } else {
-        const newQuestion: Question = { ...question, id: Date.now().toString() };
+  const handleSaveQuestion = () => {
+    if (!editingQuestion) return;
+    
+    if (viewMode === 'standalone-editor') {
+      if (isNewQuestion) {
+        const newQuestion: Question = { ...editingQuestion, id: Date.now().toString() };
         setStandaloneQuestions([...standaloneQuestions, newQuestion]);
+        setSelectedQuestionId(newQuestion.id);
+      } else {
+        setStandaloneQuestions(standaloneQuestions.map(q => 
+          q.id === editingQuestion.id ? editingQuestion : q
+        ));
       }
     } else {
-      if (!bankId) return;
-      if (editingQuestion?.question) {
+      if (!selectedBankId) return;
+      if (isNewQuestion) {
+        const newQuestion: Question = { ...editingQuestion, id: Date.now().toString() };
         setBanks(banks.map(b => 
-          b.id === bankId 
-            ? { ...b, questions: b.questions.map(q => q.id === editingQuestion.question!.id ? { ...question, id: q.id } : q) }
-            : b
-        ));
-      } else {
-        const newQuestion: Question = { ...question, id: Date.now().toString() };
-        setBanks(banks.map(b => 
-          b.id === bankId 
+          b.id === selectedBankId 
             ? { ...b, questions: [...b.questions, newQuestion] }
             : b
         ));
+        setSelectedQuestionId(newQuestion.id);
+      } else {
+        setBanks(banks.map(b => 
+          b.id === selectedBankId 
+            ? { ...b, questions: b.questions.map(q => q.id === editingQuestion.id ? editingQuestion : q) }
+            : b
+        ));
       }
     }
-    setShowQuestionDialog(false);
     setEditingQuestion(null);
-    setQuestionType('MCQ');
+    setIsNewQuestion(false);
   };
 
-  const handleDeleteStandaloneQuestion = (questionId: string) => {
-    if (confirm('Delete this standalone question?')) {
-      setStandaloneQuestions(standaloneQuestions.filter(q => q.id !== questionId));
+  const handleDeleteQuestion = (questionId: string) => {
+    if (confirm('Delete this question?')) {
+      if (viewMode === 'standalone-editor') {
+        setStandaloneQuestions(standaloneQuestions.filter(q => q.id !== questionId));
+        if (selectedQuestionId === questionId) {
+          setSelectedQuestionId(null);
+          setEditingQuestion(null);
+        }
+      } else {
+        if (!selectedBankId) return;
+        setBanks(banks.map(b => 
+          b.id === selectedBankId 
+            ? { ...b, questions: b.questions.filter(q => q.id !== questionId) }
+            : b
+        ));
+        if (selectedQuestionId === questionId) {
+          setSelectedQuestionId(null);
+          setEditingQuestion(null);
+        }
+      }
     }
   };
 
-  const handleDeleteBankQuestion = (bankId: string, questionId: string) => {
-    if (confirm('Delete this question?')) {
-      setBanks(banks.map(b => 
-        b.id === bankId 
-          ? { ...b, questions: b.questions.filter(q => q.id !== questionId) }
-          : b
-      ));
+  const handleSelectQuestion = (question: Question) => {
+    setSelectedQuestionId(question.id);
+    setEditingQuestion({ ...question });
+    setIsNewQuestion(false);
+  };
+
+  const handleNewQuestion = () => {
+    setSelectedQuestionId(null);
+    setEditingQuestion({
+      id: 'temp',
+      type: 'MCQ',
+      text: '',
+      points: 1,
+      tags: [],
+      correctOptions: [''],
+      incorrectOptions: ['', ''],
+    });
+    setIsNewQuestion(true);
+  };
+
+  const handleCancelEdit = () => {
+    if (selectedQuestion) {
+      setEditingQuestion({ ...selectedQuestion });
+    } else {
+      setEditingQuestion(null);
+      setIsNewQuestion(false);
     }
   };
 
@@ -276,59 +322,19 @@ export function StudioHome() {
     return type === 'MCQ' ? 'MCQ' : 'Written';
   };
 
-  const renderQuestionItem = (question: Question, source: 'bank' | 'standalone', bankId?: string) => (
-    <div key={question.id} style={{ border: '1px solid #e0e0e0', borderRadius: '6px', padding: '16px', fontFamily: 'Roboto, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11px', fontWeight: 'bold', color: accentColor, background: '#e8f5e9', padding: '2px 8px', borderRadius: '12px', fontFamily: 'Roboto, sans-serif' }}>
-              {getQuestionTypeLabel(question.type)}
-            </span>
-            <span style={{ fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>{question.points} pts</span>
-            {question.tags.map(tag => (
-              <span key={tag} style={{ fontSize: '11px', background: '#f0f0f0', padding: '2px 8px', borderRadius: '12px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }} onClick={() => setTagFilter(tag)}>
-                #{tag}
-              </span>
-            ))}
-          </div>
-          <div style={{ fontSize: '14px', lineHeight: 1.4, color: 'black', fontFamily: 'Roboto, sans-serif', marginBottom: '8px' }}>{question.text}</div>
-          
-          {question.type === 'MCQ' && (
-            <>
-              <div style={{ fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>
-                <span style={{ color: accentColor }}>✓ Correct:</span> {question.correctOptions?.join(', ')}
-              </div>
-              <div style={{ fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>
-                <span style={{ color: '#999' }}>✗ Incorrect:</span> {question.incorrectOptions?.join(', ')}
-              </div>
-            </>
-          )}
-          
-          {question.type === 'WRITTEN' && question.limits && (
-            <div style={{ fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>
-              {question.limits.mode === 'characters' && `Character limit: ${question.limits.min || 'no min'} - ${question.limits.max || 'no max'}`}
-              {question.limits.mode === 'words' && `Word limit: ${question.limits.min || 'no min'} - ${question.limits.max || 'no max'}`}
-              {question.limits.mode === 'both' && `Char limit: ${question.limits.min || 'no min'} - ${question.limits.max || 'no max'} | Word limit: ${question.limits.min ? Math.floor(question.limits.min / 5) : 'no min'} - ${question.limits.max ? Math.floor(question.limits.max / 5) : 'no max'} (approx)`}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={() => { 
-            setEditingQuestion({ source, bankId, question }); 
-            setQuestionType(question.type); 
-            setShowQuestionDialog(true); 
-          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontFamily: 'Roboto, sans-serif' }}>✎</button>
-          <button onClick={() => {
-            if (source === 'standalone') {
-              handleDeleteStandaloneQuestion(question.id);
-            } else if (bankId) {
-              handleDeleteBankQuestion(bankId, question.id);
-            }
-          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontFamily: 'Roboto, sans-serif' }}>🗑</button>
-        </div>
-      </div>
-    </div>
-  );
+  const getQuestionPreview = (question: Question) => {
+    const text = question.text.length > 60 ? question.text.substring(0, 60) + '...' : question.text;
+    return `${getQuestionTypeLabel(question.type)}: ${text}`;
+  };
+
+  const handleBackToBanks = () => {
+    setViewMode('bank-list');
+    setSelectedBankId(null);
+    setSelectedQuestionId(null);
+    setEditingQuestion(null);
+    setSearchQuery('');
+    setTagFilter('');
+  };
 
   return (
     <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
@@ -339,9 +345,9 @@ export function StudioHome() {
             <span style={{ fontWeight: 'bold', fontFamily: 'Roboto, sans-serif' }}>LibreTest</span> Studio
           </div>
           <div style={{ display: 'flex', gap: '24px' }}>
-            <button onClick={() => { setActiveTab('home'); setSelectedBankId(null); }} style={getTabStyle('home')}>Home</button>
+            <button onClick={() => { setActiveTab('home'); setViewMode('bank-list'); }} style={getTabStyle('home')}>Home</button>
             <button onClick={() => setActiveTab('admin')} style={getTabStyle('admin')}>Admin</button>
-            <button onClick={() => { setActiveTab('questions'); setSelectedBankId(null); }} style={getTabStyle('questions')}>Questions</button>
+            <button onClick={() => { setActiveTab('questions'); setViewMode('bank-list'); }} style={getTabStyle('questions')}>Questions</button>
             <button onClick={() => setActiveTab('exams')} style={getTabStyle('exams')}>Exams</button>
             <button onClick={() => setActiveTab('scoring')} style={getTabStyle('scoring')}>Scoring</button>
             <button onClick={() => setActiveTab('settings')} style={getTabStyle('settings')}>Settings</button>
@@ -353,7 +359,7 @@ export function StudioHome() {
       </div>
 
       {/* Main content */}
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '32px 24px', fontFamily: 'Roboto, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', fontFamily: 'Roboto, sans-serif' }}>
         {activeTab === 'home' && (
           <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
             <div style={{ flex: 2, minWidth: '300px' }}>
@@ -408,168 +414,333 @@ export function StudioHome() {
 
         {activeTab === 'questions' && (
           <div style={{ fontFamily: 'Roboto, sans-serif' }}>
-            {/* Sub-tabs */}
-            <div style={{ display: 'flex', gap: '4px', marginBottom: '24px', borderBottom: '1px solid #e0e0e0' }}>
-              <button
-                onClick={() => { setQuestionsSubTab('banks'); setSelectedBankId(null); setSearchQuery(''); setTagFilter(''); }}
-                style={{
-                  padding: '10px 20px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '15px',
-                  fontFamily: 'Roboto, sans-serif',
-                  fontWeight: questionsSubTab === 'banks' ? 700 : 400,
-                  color: questionsSubTab === 'banks' ? accentColor : '#666',
-                  borderBottom: questionsSubTab === 'banks' ? `2px solid ${accentColor}` : 'none'
-                }}
-              >
-                Question Banks
-              </button>
-              <button
-                onClick={() => { setQuestionsSubTab('standalone'); setSelectedBankId(null); setSearchQuery(''); setTagFilter(''); }}
-                style={{
-                  padding: '10px 20px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '15px',
-                  fontFamily: 'Roboto, sans-serif',
-                  fontWeight: questionsSubTab === 'standalone' ? 700 : 400,
-                  color: questionsSubTab === 'standalone' ? accentColor : '#666',
-                  borderBottom: questionsSubTab === 'standalone' ? `2px solid ${accentColor}` : 'none'
-                }}
-              >
-                Standalone Questions
-              </button>
-            </div>
-
-            {/* Question Banks View */}
-            {questionsSubTab === 'banks' && (
+            {viewMode === 'bank-list' ? (
+              /* Bank List View */
               <div>
-                {!selectedBank ? (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                      <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>Question Banks</h2>
-                      <button onClick={() => { setEditingBank(null); setShowBankDialog(true); }} style={{ padding: '8px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
-                        + New Bank
-                      </button>
-                    </div>
-
-                    <div style={{ border: '1px solid #e0e0e0', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}>
-                      {banks.map((bank, idx) => (
-                        <div key={bank.id} style={{ 
-                          display: 'flex', 
-                          alignItems: 'center',
-                          borderBottom: idx === banks.length - 1 ? 'none' : '1px solid #e0e0e0',
-                          height: '48px'
-                        }}>
-                          <button 
-                            onClick={() => handleDeleteBank(bank.id)}
-                            style={{ 
-                              background: deleteColor,
-                              border: 'none',
-                              color: 'white',
-                              cursor: 'pointer',
-                              width: '80px',
-                              height: '48px',
-                              fontSize: '13px',
-                              fontWeight: 500,
-                              fontFamily: 'Roboto, sans-serif'
-                            }}
-                          >
-                            Delete
-                          </button>
-                          <div style={{ flex: 1, paddingLeft: '20px', fontSize: '15px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>
-                            {bank.name}
-                          </div>
-                          <button 
-                            onClick={() => setSelectedBankId(bank.id)}
-                            style={{ 
-                              background: 'none',
-                              border: 'none',
-                              color: accentColor,
-                              cursor: 'pointer',
-                              padding: '0 20px',
-                              fontSize: '13px',
-                              fontWeight: 500,
-                              height: '48px',
-                              fontFamily: 'Roboto, sans-serif'
-                            }}
-                          >
-                            Configure →
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {banks.length === 0 && (
-                      <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999', fontFamily: 'Roboto, sans-serif' }}>
-                        <p style={{ fontFamily: 'Roboto, sans-serif' }}>No question banks yet. Click "+ New Bank" to get started.</p>
-                      </div>
-                    )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                  <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>Question Banks</h2>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button onClick={() => { setViewMode('standalone-editor'); setSelectedQuestionId(standaloneQuestions[0]?.id || null); if (standaloneQuestions[0]) setEditingQuestion({ ...standaloneQuestions[0] }); }} style={{ padding: '8px 16px', backgroundColor: 'white', color: accentColor, border: `1px solid ${accentColor}`, borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
+                      Standalone Questions →
+                    </button>
+                    <button onClick={() => { setEditingBank(null); setShowBankDialog(true); }} style={{ padding: '8px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
+                      + New Bank
+                    </button>
                   </div>
-                ) : (
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '24px' }}>
-                      <button onClick={() => setSelectedBankId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontFamily: 'Roboto, sans-serif' }}>
-                        ← Back
+                </div>
+
+                <div style={{ border: '1px solid #e0e0e0', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}>
+                  {banks.map((bank, idx) => (
+                    <div key={bank.id} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      borderBottom: idx === banks.length - 1 ? 'none' : '1px solid #e0e0e0',
+                      height: '48px'
+                    }}>
+                      <button 
+                        onClick={() => handleDeleteBank(bank.id)}
+                        style={{ 
+                          background: deleteColor,
+                          border: 'none',
+                          color: 'white',
+                          cursor: 'pointer',
+                          width: '80px',
+                          height: '48px',
+                          fontSize: '13px',
+                          fontWeight: 500,
+                          fontFamily: 'Roboto, sans-serif'
+                        }}
+                      >
+                        Delete
                       </button>
-                      <h2 style={{ fontSize: '22px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>{selectedBank.name}</h2>
-                      <button onClick={() => { setEditingQuestion({ source: 'bank', bankId: selectedBank.id, question: null }); setQuestionType('MCQ'); setShowQuestionDialog(true); }} style={{ padding: '8px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
-                        + Add Question
+                      <div style={{ flex: 1, paddingLeft: '20px', fontSize: '15px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                        {bank.name}
+                      </div>
+                      <button 
+                        onClick={() => { setViewMode('bank-editor'); setSelectedBankId(bank.id); setSelectedQuestionId(bank.questions[0]?.id || null); if (bank.questions[0]) setEditingQuestion({ ...bank.questions[0] }); }}
+                        style={{ 
+                          background: 'none',
+                          border: 'none',
+                          color: accentColor,
+                          cursor: 'pointer',
+                          padding: '0 20px',
+                          fontSize: '13px',
+                          fontWeight: 500,
+                          height: '48px',
+                          fontFamily: 'Roboto, sans-serif'
+                        }}
+                      >
+                        Configure →
                       </button>
                     </div>
+                  ))}
+                </div>
 
-                    {selectedBank.description && (
-                      <p style={{ color: '#666', marginBottom: '20px', fontSize: '14px', fontFamily: 'Roboto, sans-serif' }}>{selectedBank.description}</p>
-                    )}
-
-                    <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-                      <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} />
-                      <input type="text" placeholder="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} />
-                      {(searchQuery || tagFilter) && <button onClick={() => { setSearchQuery(''); setTagFilter(''); }} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>Clear</button>}
-                    </div>
-
-                    {filteredBankQuestions.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999', border: '1px dashed #ddd', fontFamily: 'Roboto, sans-serif' }}>
-                        <p style={{ fontFamily: 'Roboto, sans-serif' }}>{selectedBank.questions.length === 0 ? 'No questions yet. Click "+ Add Question" to get started.' : 'No matching questions.'}</p>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {filteredBankQuestions.map(question => renderQuestionItem(question, 'bank', selectedBank.id))}
-                      </div>
-                    )}
+                {banks.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999', fontFamily: 'Roboto, sans-serif' }}>
+                    <p style={{ fontFamily: 'Roboto, sans-serif' }}>No question banks yet. Click "+ New Bank" to get started.</p>
                   </div>
                 )}
               </div>
-            )}
-
-            {/* Standalone Questions View */}
-            {questionsSubTab === 'standalone' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                  <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>Standalone Questions</h2>
-                  <button onClick={() => { setEditingQuestion({ source: 'standalone', question: null }); setQuestionType('MCQ'); setShowQuestionDialog(true); }} style={{ padding: '8px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
-                    + New Question
-                  </button>
+            ) : (
+              /* Split Pane Editor (for both Bank and Standalone) */
+              <div style={{ display: 'flex', gap: '24px', minHeight: '600px' }}>
+                {/* Left Panel - Question List */}
+                <div style={{ width: '320px', flexShrink: 0, borderRight: '1px solid #e0e0e0', paddingRight: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <button onClick={handleBackToBanks} style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>
+                      ← Back to Banks
+                    </button>
+                    <button onClick={handleNewQuestion} style={{ padding: '6px 12px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>
+                      + New
+                    </button>
+                  </div>
+                  
+                  <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif', marginBottom: '12px' }}>
+                    {viewMode === 'standalone-editor' ? 'Standalone Questions' : selectedBank?.name}
+                  </h3>
+                  
+                  {/* Search/Filter */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <input 
+                      type="text" 
+                      placeholder="Search..." 
+                      value={searchQuery} 
+                      onChange={(e) => setSearchQuery(e.target.value)} 
+                      style={{ width: '100%', padding: '6px 10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', fontSize: '13px', marginBottom: '8px' }} 
+                    />
+                    <input 
+                      type="text" 
+                      placeholder="Filter by tag" 
+                      value={tagFilter} 
+                      onChange={(e) => setTagFilter(e.target.value)} 
+                      style={{ width: '100%', padding: '6px 10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }} 
+                    />
+                  </div>
+                  
+                  {/* Question List */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '500px', overflowY: 'auto' }}>
+                    {filteredQuestions.map((question, idx) => (
+                      <div 
+                        key={question.id}
+                        onClick={() => handleSelectQuestion(question)}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: selectedQuestionId === question.id ? '#e8f5e9' : 'transparent',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          border: selectedQuestionId === question.id ? `1px solid ${accentColor}` : '1px solid transparent',
+                          fontFamily: 'Roboto, sans-serif'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: selectedQuestionId === question.id ? accentColor : '#666', fontFamily: 'Roboto, sans-serif' }}>
+                            #{idx + 1}
+                          </span>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteQuestion(question.id); }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontSize: '12px', fontFamily: 'Roboto, sans-serif' }}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: 'Roboto, sans-serif' }}>
+                          {getQuestionPreview(question)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#999', marginTop: '4px', fontFamily: 'Roboto, sans-serif' }}>
+                          {question.points} pts | {question.tags.slice(0, 2).join(', ')}{question.tags.length > 2 ? '...' : ''}
+                        </div>
+                      </div>
+                    ))}
+                    {filteredQuestions.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>
+                        No questions found
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-                  <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} />
-                  <input type="text" placeholder="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} />
-                  {(searchQuery || tagFilter) && <button onClick={() => { setSearchQuery(''); setTagFilter(''); }} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>Clear</button>}
-                </div>
+                {/* Right Panel - Question Editor */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {editingQuestion ? (
+                    <div style={{ padding: '20px', backgroundColor: '#fafafa', borderRadius: '8px', minHeight: '600px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'black', fontFamily: 'Roboto, sans-serif' }}>
+                          {isNewQuestion ? 'New Question' : `Edit Question #${filteredQuestions.findIndex(q => q.id === editingQuestion.id) + 1}`}
+                        </h3>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                          <button onClick={handleCancelEdit} style={{ padding: '6px 16px', background: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
+                            Cancel
+                          </button>
+                          <button onClick={handleSaveQuestion} style={{ padding: '6px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
+                            Save
+                          </button>
+                        </div>
+                      </div>
 
-                {filteredStandaloneQuestions.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999', border: '1px dashed #ddd', fontFamily: 'Roboto, sans-serif' }}>
-                    <p style={{ fontFamily: 'Roboto, sans-serif' }}>{standaloneQuestions.length === 0 ? 'No standalone questions yet. Click "+ New Question" to get started.' : 'No matching questions.'}</p>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {filteredStandaloneQuestions.map(question => renderQuestionItem(question, 'standalone'))}
-                  </div>
-                )}
+                      {/* Question Type */}
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>Type</label>
+                        <select 
+                          value={editingQuestion.type}
+                          onChange={(e) => setEditingQuestion({ ...editingQuestion, type: e.target.value as QuestionType })}
+                          style={{ width: '200px', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
+                        >
+                          <option value="MCQ">Multiple Choice (MCQ)</option>
+                          <option value="WRITTEN">Written Response</option>
+                        </select>
+                      </div>
+
+                      {/* Question Text */}
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>Question Text</label>
+                        <textarea 
+                          value={editingQuestion.text}
+                          onChange={(e) => setEditingQuestion({ ...editingQuestion, text: e.target.value })}
+                          style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', minHeight: '100px', fontFamily: 'Roboto, sans-serif' }}
+                        />
+                      </div>
+
+                      {/* Points */}
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>Points</label>
+                        <input 
+                          type="number" 
+                          value={editingQuestion.points}
+                          onChange={(e) => setEditingQuestion({ ...editingQuestion, points: parseInt(e.target.value) || 0 })}
+                          style={{ width: '100px', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
+                        />
+                      </div>
+
+                      {/* Tags */}
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>Tags (comma separated)</label>
+                        <input 
+                          type="text" 
+                          value={editingQuestion.tags.join(', ')}
+                          onChange={(e) => setEditingQuestion({ ...editingQuestion, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                          style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
+                          placeholder="algebra, easy, derivatives"
+                        />
+                      </div>
+
+                      {/* MCQ Fields */}
+                      {editingQuestion.type === 'MCQ' && (
+                        <>
+                          <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: accentColor, fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>✓ Correct Options</label>
+                            {editingQuestion.correctOptions?.map((opt, idx) => (
+                              <input 
+                                key={idx}
+                                type="text"
+                                value={opt}
+                                onChange={(e) => {
+                                  const newOpts = [...(editingQuestion.correctOptions || [])];
+                                  newOpts[idx] = e.target.value;
+                                  setEditingQuestion({ ...editingQuestion, correctOptions: newOpts });
+                                }}
+                                style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', marginBottom: '8px', fontFamily: 'Roboto, sans-serif' }}
+                                placeholder="Correct option text"
+                              />
+                            ))}
+                            <button 
+                              onClick={() => setEditingQuestion({ ...editingQuestion, correctOptions: [...(editingQuestion.correctOptions || []), ''] })}
+                              style={{ marginTop: '4px', background: 'none', border: 'none', color: accentColor, cursor: 'pointer', fontSize: '13px', fontFamily: 'Roboto, sans-serif' }}
+                            >
+                              + Add correct option
+                            </button>
+                          </div>
+
+                          <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#999', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>✗ Incorrect Options</label>
+                            {editingQuestion.incorrectOptions?.map((opt, idx) => (
+                              <input 
+                                key={idx}
+                                type="text"
+                                value={opt}
+                                onChange={(e) => {
+                                  const newOpts = [...(editingQuestion.incorrectOptions || [])];
+                                  newOpts[idx] = e.target.value;
+                                  setEditingQuestion({ ...editingQuestion, incorrectOptions: newOpts });
+                                }}
+                                style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', marginBottom: '8px', fontFamily: 'Roboto, sans-serif' }}
+                                placeholder="Incorrect option text"
+                              />
+                            ))}
+                            <button 
+                              onClick={() => setEditingQuestion({ ...editingQuestion, incorrectOptions: [...(editingQuestion.incorrectOptions || []), ''] })}
+                              style={{ marginTop: '4px', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '13px', fontFamily: 'Roboto, sans-serif' }}
+                            >
+                              + Add incorrect option
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Written Response Fields */}
+                      {editingQuestion.type === 'WRITTEN' && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>Response Limits</label>
+                          
+                          <select 
+                            value={editingQuestion.limits?.mode || 'characters'}
+                            onChange={(e) => setEditingQuestion({ 
+                              ...editingQuestion, 
+                              limits: { ...editingQuestion.limits, mode: e.target.value as 'characters' | 'words' | 'both' }
+                            })}
+                            style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', marginBottom: '12px', fontFamily: 'Roboto, sans-serif' }}
+                          >
+                            <option value="characters">Character limit</option>
+                            <option value="words">Word limit</option>
+                            <option value="both">Both character + word limits</option>
+                          </select>
+
+                          <div style={{ display: 'flex', gap: '12px' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>Minimum</label>
+                              <input 
+                                type="number"
+                                value={editingQuestion.limits?.min || ''}
+                                onChange={(e) => setEditingQuestion({ 
+                                  ...editingQuestion, 
+                                  limits: { ...editingQuestion.limits, min: e.target.value ? parseInt(e.target.value) : undefined }
+                                })}
+                                style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
+                                placeholder="Optional"
+                              />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>Maximum</label>
+                              <input 
+                                type="number"
+                                value={editingQuestion.limits?.max || ''}
+                                onChange={(e) => setEditingQuestion({ 
+                                  ...editingQuestion, 
+                                  limits: { ...editingQuestion.limits, max: e.target.value ? parseInt(e.target.value) : undefined }
+                                })}
+                                style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
+                                placeholder="Optional"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px', color: '#999', fontFamily: 'Roboto, sans-serif' }}>
+                      {currentQuestions.length === 0 ? (
+                        <div style={{ textAlign: 'center' }}>
+                          <p>No questions in {viewMode === 'standalone-editor' ? 'standalone' : 'this bank'}.</p>
+                          <button onClick={handleNewQuestion} style={{ marginTop: '12px', padding: '8px 16px', backgroundColor: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>
+                            Create First Question
+                          </button>
+                        </div>
+                      ) : (
+                        <p>Select a question from the left to edit, or create a new one.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -611,165 +782,6 @@ export function StudioHome() {
                 const desc = (document.getElementById('bankDescription') as HTMLTextAreaElement).value;
                 if (name.trim()) editingBank ? handleUpdateBank(editingBank.id, name.trim(), desc) : handleCreateBank(name.trim(), desc);
               }} style={{ padding: '8px 16px', background: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Question Dialog */}
-      {showQuestionDialog && editingQuestion && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', borderRadius: '8px', padding: '24px', width: '90%', maxWidth: '600px', maxHeight: '80vh', overflow: 'auto', fontFamily: 'Roboto, sans-serif' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', color: 'black', fontFamily: 'Roboto, sans-serif' }}>{editingQuestion.question ? 'Edit Question' : 'New Question'}</h3>
-            
-            {/* Question Type Selector */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>Question Type *</label>
-              <select 
-                value={questionType}
-                onChange={(e) => setQuestionType(e.target.value as QuestionType)}
-                style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}
-              >
-                <option value="MCQ">Multiple Choice (MCQ)</option>
-                <option value="WRITTEN">Written Response</option>
-              </select>
-            </div>
-
-            {/* Question Text */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>Question Text *</label>
-              <textarea id="questionText" defaultValue={editingQuestion.question?.text || ''} style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', minHeight: '80px', fontFamily: 'Roboto, sans-serif' }} />
-            </div>
-
-            {/* Points */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>Points *</label>
-              <input id="questionPoints" type="number" defaultValue={editingQuestion.question?.points || 1} style={{ width: '100px', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} />
-            </div>
-
-            {/* Tags */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>Tags (comma separated)</label>
-              <input id="questionTags" defaultValue={editingQuestion.question?.tags.join(', ') || ''} style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} placeholder="algebra, easy, derivatives" />
-            </div>
-
-            {/* MCQ Fields */}
-            {questionType === 'MCQ' && (
-              <>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: accentColor, fontFamily: 'Roboto, sans-serif' }}>✓ Correct Options</label>
-                  <div id="correctOptionsContainer" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {(editingQuestion.question?.type === 'MCQ' && editingQuestion.question.correctOptions?.length ? editingQuestion.question.correctOptions : ['']).map((opt, idx) => (
-                      <input key={idx} type="text" className="correct-option" defaultValue={opt} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} placeholder="Correct option text" />
-                    ))}
-                  </div>
-                  <button type="button" onClick={() => {
-                    const container = document.getElementById('correctOptionsContainer');
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.className = 'correct-option';
-                    input.placeholder = 'Correct option text';
-                    input.style.cssText = 'width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-family: Roboto, sans-serif;';
-                    container?.appendChild(input);
-                  }} style={{ marginTop: '8px', background: 'none', border: 'none', color: accentColor, cursor: 'pointer', fontSize: '13px', fontFamily: 'Roboto, sans-serif' }}>+ Add correct option</button>
-                </div>
-
-                <div style={{ marginBottom: '24px' }}>
-                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#999', fontFamily: 'Roboto, sans-serif' }}>✗ Incorrect Options</label>
-                  <div id="incorrectOptionsContainer" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {(editingQuestion.question?.type === 'MCQ' && editingQuestion.question.incorrectOptions?.length ? editingQuestion.question.incorrectOptions : ['', '']).map((opt, idx) => (
-                      <input key={idx} type="text" className="incorrect-option" defaultValue={opt} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} placeholder="Incorrect option text" />
-                    ))}
-                  </div>
-                  <button type="button" onClick={() => {
-                    const container = document.getElementById('incorrectOptionsContainer');
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.className = 'incorrect-option';
-                    input.placeholder = 'Incorrect option text';
-                    input.style.cssText = 'width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-family: Roboto, sans-serif;';
-                    container?.appendChild(input);
-                  }} style={{ marginTop: '8px', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '13px', fontFamily: 'Roboto, sans-serif' }}>+ Add incorrect option</button>
-                </div>
-              </>
-            )}
-
-            {/* Written Response Fields */}
-            {questionType === 'WRITTEN' && (
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: 'black', fontFamily: 'Roboto, sans-serif' }}>Response Limits</label>
-                
-                <div style={{ marginBottom: '12px' }}>
-                  <select id="limitMode" defaultValue={editingQuestion.question?.type === 'WRITTEN' ? editingQuestion.question.limits?.mode || 'characters' : 'characters'} style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }}>
-                    <option value="characters">Character limit</option>
-                    <option value="words">Word limit</option>
-                    <option value="both">Both character + word limits</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>Minimum</label>
-                    <input id="limitMin" type="number" defaultValue={editingQuestion.question?.type === 'WRITTEN' ? editingQuestion.question.limits?.min || '' : ''} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} placeholder="Optional" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#666', fontFamily: 'Roboto, sans-serif' }}>Maximum</label>
-                    <input id="limitMax" type="number" defaultValue={editingQuestion.question?.type === 'WRITTEN' ? editingQuestion.question.limits?.max || '' : ''} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif' }} placeholder="Optional" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button onClick={() => { setShowQuestionDialog(false); setEditingQuestion(null); setQuestionType('MCQ'); }} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>Cancel</button>
-              <button onClick={() => {
-                const text = (document.getElementById('questionText') as HTMLTextAreaElement).value;
-                const points = parseInt((document.getElementById('questionPoints') as HTMLInputElement).value);
-                const tags = (document.getElementById('questionTags') as HTMLInputElement).value.split(',').map(t => t.trim()).filter(t => t);
-                
-                if (!text) {
-                  alert('Please enter question text.');
-                  return;
-                }
-
-                if (questionType === 'MCQ') {
-                  const correctOptions = Array.from(document.querySelectorAll('.correct-option')).map(input => (input as HTMLInputElement).value.trim()).filter(v => v);
-                  const incorrectOptions = Array.from(document.querySelectorAll('.incorrect-option')).map(input => (input as HTMLInputElement).value.trim()).filter(v => v);
-                  
-                  if (correctOptions.length === 0) {
-                    alert('Please add at least one correct option.');
-                    return;
-                  }
-                  if (incorrectOptions.length === 0) {
-                    alert('Please add at least one incorrect option.');
-                    return;
-                  }
-                  
-                  handleSaveQuestion(editingQuestion.source, editingQuestion.bankId, { 
-                    type: 'MCQ', 
-                    text, 
-                    points: points || 1, 
-                    tags, 
-                    correctOptions, 
-                    incorrectOptions 
-                  });
-                } else {
-                  const mode = (document.getElementById('limitMode') as HTMLSelectElement).value as 'characters' | 'words' | 'both';
-                  const minVal = (document.getElementById('limitMin') as HTMLInputElement).value;
-                  const maxVal = (document.getElementById('limitMax') as HTMLInputElement).value;
-                  const limits: WrittenResponseLimits = { mode };
-                  if (minVal) limits.min = parseInt(minVal);
-                  if (maxVal) limits.max = parseInt(maxVal);
-                  
-                  handleSaveQuestion(editingQuestion.source, editingQuestion.bankId, { 
-                    type: 'WRITTEN', 
-                    text, 
-                    points: points || 1, 
-                    tags, 
-                    limits 
-                  });
-                }
-              }} style={{ padding: '8px 16px', background: accentColor, color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif' }}>Save Question</button>
             </div>
           </div>
         </div>
