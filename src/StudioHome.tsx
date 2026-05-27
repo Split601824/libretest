@@ -17,7 +17,7 @@ const placeholderExams: ExamCard[] = [
 const accentColor = '#00c462';
 
 export function StudioHome() {
-  const [activeTab, setActiveTab] = useState<'home' | 'admin' | 'questions' | 'exams' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'admin' | 'questions' | 'exams' | 'scoring' | 'settings'>('home');
   const [now, setNow] = useState(new Date());
   const [showAll, setShowAll] = useState(false);
 
@@ -50,11 +50,12 @@ export function StudioHome() {
           <div style={{ fontSize: '20px', color: 'white', fontFamily: 'Roboto, sans-serif' }}>
             <span style={{ fontWeight: 'bold', fontFamily: 'Roboto, sans-serif' }}>LibreTest</span> Studio
           </div>
-          <div style={{ display: 'flex', gap: '48px' }}>
+          <div style={{ display: 'flex', gap: '24px' }}>
             <button onClick={() => setActiveTab('home')} style={getTabStyle('home')}>Home</button>
             <button onClick={() => setActiveTab('admin')} style={getTabStyle('admin')}>Admin</button>
             <button onClick={() => setActiveTab('questions')} style={getTabStyle('questions')}>Questions</button>
             <button onClick={() => setActiveTab('exams')} style={getTabStyle('exams')}>Exams</button>
+            <button onClick={() => setActiveTab('scoring')} style={getTabStyle('scoring')}>Scoring</button>
             <button onClick={() => setActiveTab('settings')} style={getTabStyle('settings')}>Settings</button>
           </div>
           <div style={{ fontSize: '14px', color: 'white', fontFamily: 'Roboto, sans-serif' }}>
@@ -169,6 +170,14 @@ export function StudioHome() {
             <p style={{ fontFamily: 'Roboto, sans-serif' }}>Exam creation and management will appear here.</p>
           </div>
         )}
+
+        {activeTab === 'scoring' && (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#666' }}>
+                <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: 'black', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>Scoring</h2>
+                <p style={{ fontFamily: 'Roboto, sans-serif' }}>Creation of scoring systems will appear here.</p>
+            </div>
+        )}
+
 
         {activeTab === 'settings' && (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#666' }}>
