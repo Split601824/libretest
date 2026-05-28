@@ -248,7 +248,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
   };
 
   return (
-    <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
+       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
       {/* Green top bar */}
       <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
@@ -256,10 +256,10 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
           <div style={{ display: 'flex', gap: '48px' }}>
-            <button onClick={() => setActiveTab('home')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'home' ? 700 : 400, color: 'white' }}>{t.home}</button>
-            <button onClick={() => setActiveTab('past')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'past' ? 700 : 400, color: 'white' }}>{t.past}</button>
-            <button onClick={() => setActiveTab('results')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'results' ? 700 : 400, color: 'white' }}>{t.results}</button>
-            <button onClick={() => setActiveTab('settings')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'settings' ? 700 : 400, color: 'white' }}>{t.settings}</button>
+            <button onClick={() => setActiveTab('home')} style={{ fontFamily: 'Roboto, sans-serif',background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'home' ? 700 : 400, color: 'white' }}>{t.home}</button>
+            <button onClick={() => setActiveTab('past')} style={{ fontFamily: 'Roboto, sans-serif', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'past' ? 700 : 400, color: 'white' }}>{t.past}</button>
+            <button onClick={() => setActiveTab('results')} style={{ fontFamily: 'Roboto, sans-serif', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'results' ? 700 : 400, color: 'white' }}>{t.results}</button>
+            <button onClick={() => setActiveTab('settings')} style={{ fontFamily: 'Roboto, sans-serif', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: activeTab === 'settings' ? 700 : 400, color: 'white' }}>{t.settings}</button>
           </div>
           <div style={{ fontSize: '14px', color: 'white' }}>
             {getFormattedDate()} | {getFormattedTime()} | 🔋 {batteryPlaceholder}
@@ -277,13 +277,13 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                 const open = isExamOpen(exam.openDate, exam.closeDate);
                 return (
                   <div key={exam.id} style={{ border: '1px solid #e0e0e0', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
-                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>{exam.subject}</div>
+                 <div style={{ fontSize: '14px', color: '#000', marginBottom: '8px' }}>{exam.subject}</div>
                     <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '12px' }}>{exam.title}</div>
                     <div style={{ height: '1px', backgroundColor: '#e0e0e0', margin: '12px 0' }} />
-                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+                    <div style={{ fontSize: '12px', color: '#000', marginBottom: '4px' }}>
                       Open: {exam.openDate.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
+                    <div style={{ fontSize: '12px', color: '#000', marginBottom: '12px' }}>
                       Close: {exam.closeDate.toLocaleString()}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -317,8 +317,8 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
             <div style={{ flex: 1, minWidth: '280px' }}>
               <div style={{ marginBottom: '32px' }}>
                 <h1 style={{ fontFamily: 'Roboto', fontSize: '24px', fontWeight: 'bold', marginBottom: '8px', color: '#000' }}>{t.welcome}</h1>
-                <p style={{ color: '#666' }}>{t.openPlatform}</p>
-                <p style={{ color: '#666' }}>{t.takeExamsHere}</p>
+                     <p style={{ color: 'black' }}>{t.openPlatform}</p>
+                     <p style={{ color: 'black' }}>{t.takeExamsHere}</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '32px' }}>
@@ -336,8 +336,8 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
               <input ref={pdfInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleDigitizePDFFile} />
 
               <div style={{ backgroundColor: '#f9f9f9', padding: '16px', borderRadius: '8px', borderLeft: `4px solid #00b000` }}>
-                <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>{t.advice}</h3>
-                <ol style={{ margin: 0, paddingLeft: '20px', color: '#555', fontSize: '13px', lineHeight: '1.6' }}>
+                   <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>{t.advice}</h3>
+                   <ol style={{ margin: 0, paddingLeft: '20px', color: 'black', fontSize: '13px', lineHeight: '1.6' }}>
                   <li>{t.tip1}</li>
                   <li>{t.tip2}</li>
                   <li>{t.tip3}</li>
@@ -351,12 +351,12 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
         {activeTab === 'past' && (
           <div>
             {pastExams.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                 <div style={{ textAlign: 'center', padding: '40px', color: 'black' }}>
                 {t.noPastExams}
               </div>
             ) : (
               <>
-                <h2 style={{ marginBottom: '20px' }}>{t.pastExams}</h2>
+                <h2 style={{ fontFamily: 'Roboto, sans-serif', color: 'black', marginBottom: '20px' }}>{t.pastExams}</h2>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
@@ -375,7 +375,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
                           {exam.status === 'marked' ? (
                             <span style={{ backgroundColor: '#00b000', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>{t.marked}</span>
                           ) : (
-                            <span style={{ color: '#666' }}>{t.unmarked}</span>
+                       <span style={{ color: 'black' }}>{t.unmarked}</span>
                           )}
                         </td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
@@ -466,7 +466,7 @@ export function PlayerHome({ onStartExam, onRegistryCode }: PlayerHomeProps) {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', minWidth: '300px' }}>
             <h3 style={{ marginBottom: '8px' }}>{t.digitizePDF}</h3>
-            <p style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>Upload a PDF to convert to a digital test.</p>
+            <p style={{ fontSize: '14px', color: 'black', marginBottom: '16px' }}>Upload a PDF to convert to a digital test.</p>
             <input type="file" accept=".pdf" onChange={handleDigitizePDFFile} style={{ width: '100%', marginBottom: '16px' }} />
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button onClick={() => setShowDigitizeModal(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
