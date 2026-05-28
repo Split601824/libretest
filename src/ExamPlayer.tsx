@@ -134,6 +134,10 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   // Support both the legacy exam format and the newer JSON structure which wraps the exam under an "exam" key
   const examData: Exam | LegacyExam = (exam as any).exam ? (exam as any).exam : exam;
   
+  // DEBUG: Log raw sections order
+  console.log('=== DEBUG EXAM PLAYER ===');
+  console.log('Raw examData sections order:', (examData as Exam).sections?.map(s => ({ id: s.id, name: s.name })));
+  
   // ALL HOOKS FIRST - before any conditional returns
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -147,8 +151,10 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [loading, setLoading] = useState(true);
   const [shuffledOptions, setShuffledOptions] = useState<Map<string, { options: string[]; fixedLetter?: string; fixedOption: string | null }>>(new Map());
 
-  // Build group hierarchy and flatten questions by group - preserving order
+  // Build group hierarchy and flatten questions by group - PRESERVING ORIGINAL JSON ORDER
   const { groupsWithQuestions, totalQuestions, totalPoints } = useMemo(() => {
+    console.log('--- useMemo running ---');
+    
     const isLegacy = (examData as any).questions && !(examData as Exam).sections;
     
     if (isLegacy) {
@@ -178,13 +184,22 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       return { groupsWithQuestions: [], totalQuestions: 0, totalPoints: 0 };
     }
     
+    // Use the array directly - order is preserved by the array itself
+    const sectionsArray = examWithSections.sections;
+    
+    console.log('Sections array before processing:', sectionsArray.map(s => ({ id: s.id, name: s.name })));
+    
     const extractGroups = (groups: GroupNode[], path: string = ''): GroupWithQuestions[] => {
       let result: GroupWithQuestions[] = [];
-      for (const group of groups) {
+      // Use standard for loop with index to guarantee order preservation
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
         const currentPath = path ? `${path} > ${group.name}` : group.name;
         const groupQuestions: FlattenedQuestion[] = [];
         
-        for (const eq of group.questions || []) {
+        // Preserve question order - use index
+        for (let qIdx = 0; qIdx < (group.questions || []).length; qIdx++) {
+          const eq = (group.questions || [])[qIdx];
           if (eq.question) {
             groupQuestions.push({
               id: eq.id,
@@ -215,17 +230,33 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       return result;
     };
     
-    let allGroups = extractGroups(examWithSections.sections);
+    let allGroups = extractGroups(sectionsArray);
     
-    if (examWithSections.conditions?.questionOrderMode === 'auto') {
+    console.log('Groups after extraction (before shuffle):', allGroups.map(g => ({ id: g.group.id, name: g.group.name, path: g.groupPath })));
+    
+    // Only shuffle if auto mode is enabled
+    if (examWithSections.conditions?.questionOrderMode === 'manual') {
+      console.log('Auto-shuffle enabled - shuffling groups');
       allGroups = shuffleArray(allGroups);
+      console.log('Groups after shuffle:', allGroups.map(g => ({ id: g.group.id, name: g.group.name })));
+    } else {
+      console.log('Auto-shuffle disabled - keeping original order');
     }
     
     const totalQ = allGroups.reduce((sum, g) => sum + g.questions.length, 0);
     const totalPts = allGroups.reduce((sum, g) => sum + g.questions.reduce((qs, q) => qs + q.points, 0), 0);
     
+    console.log('Final groups order:', allGroups.map(g => ({ id: g.group.id, name: g.group.name })));
+    console.log('Total questions:', totalQ, 'Total points:', totalPts);
+    
     return { groupsWithQuestions: allGroups, totalQuestions: totalQ, totalPoints: totalPts };
   }, [examData]);
+
+  // DEBUG: Log groups order on every render
+  useEffect(() => {
+    console.log('=== RENDER: groupsWithQuestions order ===');
+    console.log(groupsWithQuestions.map(g => ({ id: g.group.id, name: g.group.name })));
+  });
 
   // Pre-shuffle options for MCQ questions
   useEffect(() => {
@@ -298,7 +329,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     }
   }, [examData]);
 
-  // Helper functions (defined after hooks, before conditional returns)
+  // Helper functions
   const getAnswerKey = (groupId: string, questionId: string) => `${groupId}_${questionId}`;
   
   const calculateScore = () => {
@@ -422,7 +453,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     }
   };
 
-  // Timer effects (these depend on helper functions, so they come after)
+  // Timer effects
   useEffect(() => {
     if (!examStarted || submitted) return;
     const timer = setInterval(() => {
@@ -448,35 +479,25 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const currentQuestion = currentGroup?.questions[currentQuestionIndex];
   const selectedAnswer = currentQuestion ? answers.get(getAnswerKey(currentGroup.group.id, currentQuestion.id)) : null;
 
-  // Get unique top-level sections for proper labeling
-  const topLevelSections = useMemo(() => {
-    const sections: string[] = [];
-    for (const group of groupsWithQuestions) {
-      const topSection = group.groupPath.split(' > ')[0];
-      if (!sections.includes(topSection)) {
-        sections.push(topSection);
-      }
-    }
-    return sections;
-  }, [groupsWithQuestions]);
-
-  // Get current section and module indices
+  // Get section label from path (just use the group name order)
   const currentSectionLabel = useMemo(() => {
     if (!currentGroup) return '';
     const pathParts = currentGroup.groupPath.split(' > ');
-    const topSectionName = pathParts[0];
-    const sectionIdx = topLevelSections.findIndex(n => n === topSectionName) + 1;
-    
     if (pathParts.length > 1) {
-      const siblingModules = groupsWithQuestions.filter(g => {
+      const sameSectionGroups = groupsWithQuestions.filter(g => {
         const parts = g.groupPath.split(' > ');
-        return parts[0] === topSectionName && parts.length > 1;
-      }).map(g => g.groupPath);
-      const moduleIdx = siblingModules.findIndex(p => p === currentGroup.groupPath) + 1;
-      return `Section ${sectionIdx}, Module ${moduleIdx}`;
+        return parts[0] === pathParts[0] && parts.length > 1;
+      });
+      const moduleNumber = sameSectionGroups.findIndex(g => g.group.id === currentGroup.group.id) + 1;
+      const sectionNumber = groupsWithQuestions.filter(g => {
+        const parts = g.groupPath.split(' > ');
+        return parts.length === 1;
+      }).findIndex(g => g.groupPath === pathParts[0]) + 1;
+      return `Section ${sectionNumber}, Module ${moduleNumber}`;
     }
-    return `Section ${sectionIdx}`;
-  }, [currentGroup, topLevelSections, groupsWithQuestions]);
+    const sectionNumber = groupsWithQuestions.findIndex(g => g.groupPath === currentGroup.groupPath) + 1;
+    return `Section ${sectionNumber}`;
+  }, [currentGroup, groupsWithQuestions]);
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -493,9 +514,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     return question.correctOptions ? question.correctOptions.length > 1 : false;
   };
 
-  // Conditional returns based on state (all hooks are above this point)
-  
-  // Loading state
+  // Conditional returns
   if (loading) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -508,7 +527,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     );
   }
 
-  // Error display
   if (error) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
@@ -528,7 +546,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     );
   }
 
-  // Start Screen
   if (!examStarted) {
     const examTitle = (examData as any).title || 'Untitled Exam';
     const examDescription = (examData as any).description;
@@ -581,7 +598,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     );
   }
 
-  // Submitted screen
   if (submitted) {
     const { earnedPoints, totalPoints: totalPointsSum } = calculateScore();
     const hasWrittenQuestions = groupsWithQuestions.some(g => g.questions.some(q => q.type === 'WRITTEN'));
@@ -662,7 +678,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     );
   }
 
-  // No questions screen
   if (groupsWithQuestions.length === 0 || !currentGroup) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
@@ -685,7 +700,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   // Main exam UI
   return (
     <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
-      {/* Top bar */}
       <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <div style={{ fontSize: '20px', color: 'white' }}>
@@ -700,9 +714,8 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         </div>
       </div>
 
-      {/* Main content with sidebar */}
       <div style={{ display: 'flex', minHeight: 'calc(100vh - 60px)' }}>
-        {/* Sidebar - Section/Module navigation */}
+        {/* Sidebar */}
         <div style={{ 
           width: showGroupSidebar ? '280px' : '0',
           overflow: 'hidden',
@@ -725,6 +738,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
                 const pathParts = group.groupPath.split(' > ');
                 const isModule = pathParts.length > 1;
                 const indent = isModule ? '20px' : '0';
+                const displayName = isModule ? `  ${group.group.name}` : group.group.name;
                 
                 return (
                   <div key={group.group.id} style={{ marginBottom: '8px', marginLeft: indent }}>
@@ -740,7 +754,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: isActive ? 'bold' : 'normal', color: '#000000', fontSize: '13px' }}>
-                          {group.group.name}
+                          {displayName}
                         </span>
                         <span style={{ fontSize: '11px', color: '#666' }}>{groupAnswered}/{group.questions.length}</span>
                       </div>
@@ -763,7 +777,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             </button>
           )}
           
-          {/* Current location breadcrumb */}
           <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666' }}>
             {currentGroup.groupPath}
           </div>
@@ -779,7 +792,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             </div>
             <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000' }}>{currentQuestion?.text}</h2>
 
-            {/* MCQ - New format */}
             {currentQuestion?.type === 'MCQ' && currentShuffled && options.length > 0 && (
               <div>
                 {options.map((opt, idx) => {
@@ -819,7 +831,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
               </div>
             )}
 
-            {/* Legacy MCQ fallback */}
             {currentQuestion?.type === 'MCQ' && !currentShuffled && (currentQuestion.originalQuestion as LegacyQuestion).options && (
               <div>
                 {((currentQuestion.originalQuestion as LegacyQuestion).options || []).map((opt, idx) => (
@@ -840,7 +851,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
               </div>
             )}
 
-            {/* Written Response */}
             {currentQuestion?.type === 'WRITTEN' && (
               <div>
                 {(currentQuestion.originalQuestion as Question).limits && (
@@ -871,7 +881,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             )}
           </div>
 
-          {/* Navigation buttons */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px' }}>
             <button
               onClick={handlePreviousQuestion}

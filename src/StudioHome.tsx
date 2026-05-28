@@ -312,7 +312,7 @@ const placeholderStandaloneQuestions: Question[] = [
 
 const placeholderExamsData: Exam[] = [
   {
-    id: 'exam1',
+    id: '0',
     title: 'Calculus II Final',
     description: 'Final exam covering integration techniques and series',
     subject: 'Mathematics',
@@ -327,7 +327,7 @@ const placeholderExamsData: Exam[] = [
     updatedAt: Date.now(),
   },
   {
-    id: 'exam2',
+    id: '1',
     title: 'AP Chemistry Practice',
     description: 'Practice exam for AP Chemistry',
     subject: 'Science',
@@ -573,8 +573,9 @@ export function StudioHome() {
 
   // Exam handlers
   const handleCreateExam = () => {
+    const newExamId = (exams.length).toString();
     const newExam: Exam = {
-      id: Date.now().toString(),
+      id: newExamId,
       title: 'New Exam',
       description: '',
       subject: '',
@@ -618,11 +619,12 @@ export function StudioHome() {
     setExamTab('metadata');
   };
 
-  // Section operations
+  // Section operations - using sequential IDs
   const handleAddSection = () => {
     if (!editingExam) return;
+    const newSectionId = editingExam.sections.length.toString();
     const newSection: GroupNode = {
-      id: Date.now().toString(),
+      id: newSectionId,
       name: lang === 'en' ? `Section ${editingExam.sections.length + 1}` : `Sección ${editingExam.sections.length + 1}`,
       type: 'section',
       groups: [],
@@ -635,14 +637,15 @@ export function StudioHome() {
     setExpandedGroups(prev => new Set(prev).add(newSection.id));
   };
 
-  // Module operations (add module to a section)
+  // Module operations - using parent ID + sequential index
   const handleAddModule = (parentId: string) => {
     if (!editingExam) return;
     const addModuleToParent = (groups: GroupNode[]): GroupNode[] => {
       return groups.map(group => {
         if (group.id === parentId) {
+          const newModuleId = `${parentId}_${group.groups.length}`;
           const newModule: GroupNode = {
-            id: Date.now().toString(),
+            id: newModuleId,
             name: lang === 'en' ? `Module ${group.groups.length + 1}` : `Módulo ${group.groups.length + 1}`,
             type: 'module',
             groups: [],
@@ -662,14 +665,15 @@ export function StudioHome() {
     });
   };
 
-  // Submodule operations
+  // Submodule operations - using parent ID + sequential index
   const handleAddSubmodule = (parentId: string) => {
     if (!editingExam) return;
     const addSubmoduleToParent = (groups: GroupNode[]): GroupNode[] => {
       return groups.map(group => {
         if (group.id === parentId) {
+          const newSubmoduleId = `${parentId}_${group.groups.length}`;
           const newSubmodule: GroupNode = {
-            id: Date.now().toString(),
+            id: newSubmoduleId,
             name: lang === 'en' ? `Submodule ${group.groups.length + 1}` : `Submódulo ${group.groups.length + 1}`,
             type: 'submodule',
             groups: [],
@@ -725,13 +729,30 @@ export function StudioHome() {
     });
   };
 
+  // Helper to count questions in a group for sequential question IDs
+  const getQuestionCountInGroup = (groupId: string, groups: GroupNode[]): number => {
+    for (const group of groups) {
+      if (group.id === groupId) {
+        return group.questions.length;
+      }
+      if (group.groups.length > 0) {
+        const count = getQuestionCountInGroup(groupId, group.groups);
+        if (count !== -1) return count;
+      }
+    }
+    return -1;
+  };
+
   const handleAddQuestionToGroup = (groupId: string, question: Question, sourceType: 'bank' | 'standalone' | 'blank', sourceId?: string) => {
     if (!editingExam) return;
+    const questionCount = getQuestionCountInGroup(groupId, editingExam.sections);
+    const newQuestionId = `${groupId}_q${questionCount}`;
+    
     const newExamQuestion: ExamQuestion = {
-      id: Date.now().toString(),
+      id: newQuestionId,
       sourceType,
       sourceId,
-      question: { ...question, id: Date.now().toString() },
+      question: { ...question, id: newQuestionId },
       overridePoints: question.points,
     };
     
@@ -776,11 +797,12 @@ export function StudioHome() {
     const bank = banks.find(b => b.id === bankId);
     if (!bank) return;
     
-    const newQuestions: ExamQuestion[] = bank.questions.map(q => ({
-      id: Date.now().toString() + Math.random(),
+    const currentQuestionCount = getQuestionCountInGroup(groupId, editingExam.sections);
+    const newQuestions: ExamQuestion[] = bank.questions.map((q, idx) => ({
+      id: `${groupId}_q${currentQuestionCount + idx}`,
       sourceType: 'bank',
       sourceId: bank.id,
-      question: { ...q, id: Date.now().toString() + Math.random() },
+      question: { ...q, id: `${groupId}_q${currentQuestionCount + idx}` },
       overridePoints: q.points,
     }));
     
@@ -806,11 +828,12 @@ export function StudioHome() {
 
   const handleImportStandaloneToGroup = (groupId: string) => {
     if (!editingExam) return;
-    const newQuestions: ExamQuestion[] = standaloneQuestions.map(q => ({
-      id: Date.now().toString() + Math.random(),
+    const currentQuestionCount = getQuestionCountInGroup(groupId, editingExam.sections);
+    const newQuestions: ExamQuestion[] = standaloneQuestions.map((q, idx) => ({
+      id: `${groupId}_q${currentQuestionCount + idx}`,
       sourceType: 'standalone',
       sourceId: q.id,
-      question: { ...q, id: Date.now().toString() + Math.random() },
+      question: { ...q, id: `${groupId}_q${currentQuestionCount + idx}` },
       overridePoints: q.points,
     }));
     
@@ -889,17 +912,15 @@ export function StudioHome() {
   };
 
   const renderGroupTree = (groups: GroupNode[], level: number = 0): JSX.Element[] => {
-    return groups.map((group, idx) => {
+    return groups.map((group) => {
       const isExpanded = expandedGroups.has(group.id);
       const totalQuestions = group.questions.length + (group.groups.reduce((sum, g) => sum + g.questions.length, 0));
       
-      // Determine the button text based on level
       const addButtonText = level === 0 ? t('new_module', lang) : (level === 1 ? t('new_submodule', lang) : t('new_submodule', lang));
       const addHandler = level === 0 ? () => handleAddModule(group.id) : () => handleAddSubmodule(group.id);
       
       return (
         <div key={group.id} style={{ marginBottom: '16px', marginLeft: level * 24 }}>
-          {/* Group header with bracket visual */}
           <div style={{ 
             borderLeft: level > 0 ? `3px solid ${accentColor}` : 'none',
             paddingLeft: level > 0 ? '16px' : '0'
@@ -953,7 +974,7 @@ export function StudioHome() {
               </button>
               <button onClick={() => {
                 const blankQuestion: Question = {
-                  id: Date.now().toString(),
+                  id: '',
                   type: 'MCQ',
                   text: '',
                   points: 1,
@@ -972,7 +993,6 @@ export function StudioHome() {
             
             {isExpanded && (
               <div style={{ paddingLeft: '8px' }}>
-                {/* Questions in this group */}
                 {group.questions.map((eq, qIdx) => (
                   <div key={eq.id} style={{ 
                     display: 'flex', 
@@ -1010,7 +1030,6 @@ export function StudioHome() {
                   </div>
                 ))}
                 
-                {/* Child groups (modules/submodules) */}
                 {group.groups.length > 0 && renderGroupTree(group.groups, level + 1)}
               </div>
             )}
@@ -1446,7 +1465,7 @@ export function StudioHome() {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '13px', fontWeight: 500, color: selectedExamId === exam.id ? accentColor : '#666666', fontFamily: 'Roboto, sans-serif' }}>
-                          #{idx + 1}
+                          #{parseInt(exam.id) + 1}
                         </span>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteExam(exam.id); }}
