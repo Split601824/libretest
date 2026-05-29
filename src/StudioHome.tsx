@@ -56,6 +56,11 @@ interface GroupTimeLimit {
   timeLimit: TimeLimit;
 }
 
+interface SubmitControl {
+  mode: 'early' | 'auto-only' | 'after-time';
+  minMinutes?: number;
+}
+
 interface GroupNode {
   id: string;
   name: string;
@@ -64,6 +69,7 @@ interface GroupNode {
   questions: ExamQuestion[];
   timeLimit?: TimeLimit;
   breakAfter?: BreakConfig;
+  submitControl?: SubmitControl;
 }
 
 interface ExamCondition {
@@ -72,6 +78,7 @@ interface ExamCondition {
   groupTimeLimits: GroupTimeLimit[];
   passingScore?: number;
   questionOrderMode: 'manual' | 'auto';
+  submitControl: SubmitControl;
 }
 
 interface ExamQuestion {
@@ -187,7 +194,7 @@ const t = (key: string, lang: 'en' | 'es'): string => {
     'export_json': { en: 'Export this exam to JSON format for use with LibreTest Player.', es: 'Exporta este examen a formato JSON para usar con LibreTest Player.' },
     'download_json': { en: 'Download JSON', es: 'Descargar JSON' },
     'preview': { en: 'Preview', es: 'Vista Previa' },
-    'select_exam': { en: 'Select an exam from the left to edit, or create a new one.', es: 'Selecciona un examen de la izquierda para editar, o crea uno nuevo.' },
+    'select_exam': { en: 'Select an exam from the left to edit, or create a new one.', es: 'Selecciona un examen de la izquierda para editar, o crea una nueva.' },
     'create_new_exam_button': { en: 'Create New Exam', es: 'Crear Nuevo Examen' },
     'questions_count': { en: 'questions', es: 'preguntas' },
     'auto_order_badge': { en: 'Auto-order', es: 'Auto-orden' },
@@ -216,6 +223,18 @@ const t = (key: string, lang: 'en' | 'es'): string => {
     'break_message': { en: 'Break message', es: 'Mensaje de descanso' },
     'allow_early_continue': { en: 'Allow early continue', es: 'Permitir continuación temprana' },
     'minutes_abbr': { en: 'minutes', es: 'minutos' },
+    'submit_controls': { en: 'Submission', es: 'Entrega' },
+    'submit_early': { en: 'Allow early submit (student can submit anytime)', es: 'Permitir entrega temprana (el estudiante puede entregar en cualquier momento)' },
+    'submit_auto_only': { en: 'Auto-submit only (no manual submit, submits when time ends)', es: 'Solo auto-entrega (sin entrega manual, se entrega cuando termina el tiempo)' },
+    'submit_after_time': { en: 'Time-locked submission', es: 'Entrega con tiempo bloqueado' },
+    'min_time_required': { en: 'Minimum time required (minutes)', es: 'Tiempo mínimo requerido (minutos)' },
+    'group_submit_controls': { en: 'Group Submit Controls', es: 'Controles de Entrega por Grupo' },
+    'configure_submit_behavior': { en: 'Configure custom submission behavior for any section, module, or submodule.', es: 'Configure el comportamiento de entrega personalizado para cualquier sección, módulo o submódulo.' },
+    'early_submit': { en: 'Early submit (student can submit anytime)', es: 'Entrega temprana (el estudiante puede entregar en cualquier momento)' },
+    'auto_only': { en: 'Auto-submit only (no manual submit, submits when time ends)', es: 'Solo automático (sin entrega manual, se entrega cuando expira el tiempo)' },
+    'time_locked_submit': { en: 'Time-locked submission', es: 'Entrega con tiempo bloqueado' },
+    'clear_inherit': { en: 'Clear (inherit from parent/exam)', es: 'Limpiar (heredar del padre/examen)' },
+    'time_locked_hint': { en: 'Student must take at least {min} minutes. The section will auto-submit when the time limit expires.', es: 'El estudiante debe tomar al menos {min} minutos. La sección se entregará automáticamente cuando expire el límite de tiempo.' },
   };
   
   return translations[key]?.[lang] || key;
@@ -346,7 +365,8 @@ const placeholderExamsData: Exam[] = [
       globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 1, minutes: 30, seconds: 0 },
       groupTimeLimits: [],
       passingScore: 70,
-      questionOrderMode: 'auto'
+      questionOrderMode: 'auto',
+      submitControl: { mode: 'early' }
     },
     sections: [],
     createdAt: Date.now(),
@@ -362,7 +382,8 @@ const placeholderExamsData: Exam[] = [
       globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 1, minutes: 0, seconds: 0 },
       groupTimeLimits: [],
       passingScore: 60,
-      questionOrderMode: 'manual'
+      questionOrderMode: 'manual',
+      submitControl: { mode: 'early' }
     },
     sections: [],
     createdAt: Date.now(),
@@ -611,7 +632,8 @@ export function StudioHome() {
         globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 0, minutes: 0, seconds: 0 },
         groupTimeLimits: [],
         passingScore: undefined,
-        questionOrderMode: 'auto'
+        questionOrderMode: 'auto',
+        submitControl: { mode: 'early' }
       },
       sections: [],
       createdAt: Date.now(),
@@ -905,7 +927,7 @@ export function StudioHome() {
   const handleExportExam = () => {
     if (!selectedExam) return;
     const exportData = {
-      version: '0.3.7',
+      version: '0.3.8',
       format: 'libretest-exam',
       exam: {
         id: selectedExam.id,
@@ -1047,11 +1069,53 @@ export function StudioHome() {
     });
   };
 
+  const handleUpdateGroupSubmitControl = (groupId: string, submitControl: SubmitControl | undefined) => {
+    if (!editingExam) return;
+    const updateSubmitControl = (groups: GroupNode[]): GroupNode[] => {
+      return groups.map(group => {
+        if (group.id === groupId) {
+          return { ...group, submitControl };
+        }
+        if (group.groups.length > 0) {
+          return { ...group, groups: updateSubmitControl(group.groups) };
+        }
+        return group;
+      });
+    };
+    setEditingExam({
+      ...editingExam,
+      sections: updateSubmitControl(editingExam.sections)
+    });
+  };
+
+  const handleUpdateExamSubmitControl = (submitControl: SubmitControl) => {
+    if (!editingExam) return;
+    setEditingExam({
+      ...editingExam,
+      conditions: {
+        ...editingExam.conditions,
+        submitControl
+      }
+    });
+  };
+
   const getGroupTimeLimit = (groupId: string): TimeLimit | undefined => {
     if (!editingExam) return undefined;
     const group = findGroupById(editingExam.sections, groupId);
     if (group?.timeLimit?.enabled) return group.timeLimit;
     return editingExam.conditions.groupTimeLimits.find(gtl => gtl.groupId === groupId)?.timeLimit;
+  };
+
+  const getGroupSubmitControl = (groupId: string): SubmitControl | undefined => {
+    if (!editingExam) return undefined;
+    const group = findGroupById(editingExam.sections, groupId);
+    return group?.submitControl;
+  };
+
+  const getGroupTimeLimitMinutes = (groupId: string): number | null => {
+    const timeLimit = getGroupTimeLimit(groupId);
+    if (!timeLimit?.enabled || timeLimit.untimed) return null;
+    return timeLimit.days * 1440 + timeLimit.hours * 60 + timeLimit.minutes + Math.ceil(timeLimit.seconds / 60);
   };
 
   const renderTimeLimitEditor = (group: GroupNode, path: string, level: number): JSX.Element => {
@@ -1173,6 +1237,21 @@ export function StudioHome() {
       const hasBreak = group.breakAfter?.enabled === true;
       const breakDisplay = hasBreak ? `☕ ${group.breakAfter?.durationMinutes ? `${group.breakAfter.durationMinutes}m` : '∞'}` : null;
       
+      const submitControl = getGroupSubmitControl(group.id);
+      const maxTimeMinutes = getGroupTimeLimitMinutes(group.id);
+      const submitDisplay = submitControl ? (
+        <span style={{ 
+          fontSize: '10px', 
+          backgroundColor: submitControl.mode === 'auto-only' ? '#ffebee' : (submitControl.mode === 'after-time' ? '#fff3e0' : '#e8f5e9'),
+          padding: '2px 6px', 
+          borderRadius: '4px', 
+          color: submitControl.mode === 'auto-only' ? '#c62828' : (submitControl.mode === 'after-time' ? '#ff9800' : '#2e7d32'),
+          fontFamily: 'Roboto, sans-serif' 
+        }}>
+          {submitControl.mode === 'auto-only' ? '🚫 Auto-only' : (submitControl.mode === 'after-time' ? `⏱️ ${submitControl.minMinutes || 0}m min` : '✓ Early')}
+        </span>
+      ) : null;
+      
       return (
         <div key={group.id} style={{ marginBottom: '16px', marginLeft: level * 24 }}>
           <div style={{ 
@@ -1228,6 +1307,8 @@ export function StudioHome() {
                   {breakDisplay}
                 </span>
               )}
+              
+              {submitDisplay}
               
               <button onClick={addHandler} style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontSize: '12px', fontFamily: 'Roboto, sans-serif', padding: '4px 8px' }}>
                 {addButtonText}
@@ -1319,6 +1400,21 @@ export function StudioHome() {
       }
       if (group.groups.length > 0) {
         result = result.concat(collectBreakableGroups(group.groups, currentPath));
+      }
+    }
+    return result;
+  };
+
+  // Helper to collect all groups for submit control configuration
+  const collectAllGroups = (groups: GroupNode[], path: string = ''): { group: GroupNode; path: string }[] => {
+    let result: { group: GroupNode; path: string }[] = [];
+    for (const group of groups) {
+      const currentPath = path ? `${path} > ${group.name}` : group.name;
+      if (group.questions.length > 0 || group.groups.some(g => g.questions.length > 0)) {
+        result.push({ group, path: currentPath });
+      }
+      if (group.groups.length > 0) {
+        result = result.concat(collectAllGroups(group.groups, currentPath));
       }
     }
     return result;
@@ -2080,7 +2176,7 @@ export function StudioHome() {
                           )}
                         </div>
 
-                        {/* Breaks Section - NEW */}
+                        {/* Breaks Section */}
                         <div>
                           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('breaks', lang)}</label>
                           <div style={{ fontSize: '13px', color: '#666666', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>
@@ -2189,6 +2285,173 @@ export function StudioHome() {
                           })()}
                         </div>
 
+                        {/* Group Submit Controls Section - Time-locked submission (min only, max = section time limit) */}
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('group_submit_controls', lang)}</label>
+                          <div style={{ fontSize: '13px', color: '#666666', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>
+                            {t('configure_submit_behavior', lang)}
+                          </div>
+                          {(() => {
+                            const allGroups = collectAllGroups(editingExam?.sections || []);
+                            if (allGroups.length === 0) {
+                              return <p style={{ color: '#999999', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>No sections or modules with questions. Add questions to configure submit controls.</p>;
+                            }
+                            return allGroups.map(({ group, path }) => {
+                              const submitControl = getGroupSubmitControl(group.id);
+                              const mode = submitControl?.mode || 'early';
+                              const minMinutes = submitControl?.minMinutes || 0;
+                              const maxTimeMinutes = getGroupTimeLimitMinutes(group.id);
+                              
+                              return (
+                                <div key={group.id} style={{ padding: '12px', border: '1px solid #e0e0e0', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '12px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div>
+                                      <span style={{ fontWeight: 'bold', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{group.name}</span>
+                                      <span style={{ fontSize: '11px', color: '#999999', fontFamily: 'Roboto, sans-serif', marginLeft: '12px' }}>{path}</span>
+                                    </div>
+                                  </div>
+                                  
+                                  <div style={{ marginLeft: '24px', marginTop: '12px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
+                                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                                        <input
+                                          type="radio"
+                                          name={`submit_${group.id}`}
+                                          checked={mode === 'early'}
+                                          onChange={() => handleUpdateGroupSubmitControl(group.id, { mode: 'early' })}
+                                        />
+                                        {t('early_submit', lang)}
+                                      </label>
+                                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                                        <input
+                                          type="radio"
+                                          name={`submit_${group.id}`}
+                                          checked={mode === 'auto-only'}
+                                          onChange={() => handleUpdateGroupSubmitControl(group.id, { mode: 'auto-only' })}
+                                        />
+                                        {t('auto_only', lang)}
+                                      </label>
+                                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                                        <input
+                                          type="radio"
+                                          name={`submit_${group.id}`}
+                                          checked={mode === 'after-time'}
+                                          onChange={() => handleUpdateGroupSubmitControl(group.id, { mode: 'after-time', minMinutes: minMinutes || 0 })}
+                                        />
+                                        {t('time_locked_submit', lang)}
+                                      </label>
+                                    </div>
+                                    
+                                    {mode === 'after-time' && (
+                                      <div style={{ marginLeft: '24px', marginTop: '12px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                          <div>
+                                            <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+                                              {t('min_time_required', lang)}
+                                            </label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                              <input
+                                                type="number"
+                                                value={minMinutes}
+                                                onChange={(e) => handleUpdateGroupSubmitControl(group.id, { mode: 'after-time', minMinutes: parseInt(e.target.value) || 0 })}
+                                                style={{ width: '80px', padding: '6px 8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                                min="0"
+                                                max={maxTimeMinutes || undefined}
+                                              />
+                                              <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('minutes_abbr', lang)}</span>
+                                            </div>
+                                          </div>
+                                          {maxTimeMinutes !== null && (
+                                            <div style={{ fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+                                              Max time limit: {maxTimeMinutes} minutes
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div style={{ fontSize: '11px', color: '#666666', fontFamily: 'Roboto, sans-serif', marginTop: '8px' }}>
+                                          {t('time_locked_hint', lang).replace('{min}', minMinutes.toString())}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {mode !== 'early' && (
+                                      <button 
+                                        onClick={() => handleUpdateGroupSubmitControl(group.id, undefined)}
+                                        style={{ marginTop: '12px', padding: '4px 12px', background: 'none', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontFamily: 'Roboto, sans-serif', color: '#666' }}
+                                      >
+                                        {t('clear_inherit', lang)}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+
+                        {/* Submit Controls - Exam Level (Fallback) */}
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('submit_controls', lang)} (Exam Level - Fallback)</label>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                              <input
+                                type="radio"
+                                name="examSubmitMode"
+                                checked={editingExam.conditions.submitControl?.mode === 'early'}
+                                onChange={() => handleUpdateExamSubmitControl({ mode: 'early' })}
+                              />
+                              {t('submit_early', lang)}
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                              <input
+                                type="radio"
+                                name="examSubmitMode"
+                                checked={editingExam.conditions.submitControl?.mode === 'auto-only'}
+                                onChange={() => handleUpdateExamSubmitControl({ mode: 'auto-only' })}
+                              />
+                              {t('submit_auto_only', lang)}
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Roboto, sans-serif', color: '#000000' }}>
+                              <input
+                                type="radio"
+                                name="examSubmitMode"
+                                checked={editingExam.conditions.submitControl?.mode === 'after-time'}
+                                onChange={() => handleUpdateExamSubmitControl({ 
+                                  mode: 'after-time', 
+                                  minMinutes: editingExam.conditions.submitControl?.minMinutes || 0 
+                                })}
+                              />
+                              {t('time_locked_submit', lang)}
+                            </label>
+                          </div>
+                          {editingExam.conditions.submitControl?.mode === 'after-time' && (
+                            <div style={{ marginLeft: '24px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                <div>
+                                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+                                    {t('min_time_required', lang)}
+                                  </label>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                      type="number"
+                                      value={editingExam.conditions.submitControl?.minMinutes || 0}
+                                      onChange={(e) => handleUpdateExamSubmitControl({ 
+                                        mode: 'after-time', 
+                                        minMinutes: parseInt(e.target.value) || 0 
+                                      })}
+                                      style={{ width: '80px', padding: '6px 8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                      min="0"
+                                    />
+                                    <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('minutes_abbr', lang)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#666666', fontFamily: 'Roboto, sans-serif', marginTop: '8px' }}>
+                                {t('time_locked_hint', lang).replace('{min}', (editingExam.conditions.submitControl?.minMinutes || 0).toString())}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Passing Score */}
                         <div>
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('passing_score', lang)}</label>
@@ -2250,7 +2513,7 @@ export function StudioHome() {
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('preview', lang)}</label>
                           <pre style={{ backgroundColor: '#f5f5f5', padding: '12px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', overflow: 'auto', maxHeight: '300px', color: '#000000' }}>
                             {JSON.stringify({
-                              version: '0.3.7',
+                              version: '0.3.8',
                               format: 'libretest-exam',
                               exam: {
                                 id: editingExam.id,

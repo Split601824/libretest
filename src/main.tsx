@@ -5,7 +5,7 @@ import { StudioHome } from './StudioHome';
 import './index.css';
 
 // Toggle this variable to switch between Player and Studio
-const mode: 'player' | 'studio' = 'player'; // Change to 'player' to load AppPlayer
+const mode: 'player' | 'studio' = 'studio'; // Change to 'player' to load AppPlayer
 
 const App = mode === 'player' ? AppPlayer : StudioHome;
 

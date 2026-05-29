@@ -58,6 +58,11 @@ interface BreakConfig {
   allowEarlyContinue: boolean;
 }
 
+interface SubmitControl {
+  mode: 'early' | 'auto-only' | 'after-time';
+  afterMinutes?: number;
+}
+
 interface GroupNode {
   id: string;
   name: string;
@@ -66,6 +71,7 @@ interface GroupNode {
   questions: ExamQuestion[];
   timeLimit?: TimeLimit;
   breakAfter?: BreakConfig;
+  submitControl?: SubmitControl;
 }
 
 interface ExamCondition {
@@ -79,6 +85,8 @@ interface ExamCondition {
   }[];
   passingScore?: number;
   shuffleAnswers: boolean;
+  questionOrderMode?: 'manual' | 'auto';
+  submitControl?: SubmitControl;
 }
 
 interface Exam {
@@ -117,6 +125,7 @@ interface GroupInfo {
   questions: FlatQuestion[];
   timeLimit?: TimeLimit;
   breakAfter?: BreakConfig;
+  submitControl?: SubmitControl;
   startIndex: number;
   endIndex: number;
 }
@@ -197,6 +206,15 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [pendingGroupPath, setPendingGroupPath] = useState<string>('');
   const [pendingNextGroupIndex, setPendingNextGroupIndex] = useState<number | null>(null);
 
+  // Get submit control configuration for current group (with fallback to exam-level)
+  const getSubmitControlForGroup = (group: GroupInfo | null): SubmitControl => {
+    if (group?.submitControl?.mode) {
+      return group.submitControl;
+    }
+    const examWithConditions = examData as Exam;
+    return examWithConditions.conditions?.submitControl || { mode: 'early' };
+  };
+
   const getAnswerKey = (groupId: string, questionId: string) => `${groupId}_${questionId}`;
 
   // Build groups and flattened questions
@@ -258,6 +276,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       const groupId = group.id;
       const timeLimit = getTimeLimitForGroup(groupId, group.timeLimit);
       const breakAfter = group.breakAfter;
+      const submitControl = group.submitControl;
       
       const groupQuestions: FlatQuestion[] = [];
       for (const eq of group.questions) {
@@ -296,6 +315,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         questions: groupQuestions,
         timeLimit,
         breakAfter,
+        submitControl,
         startIndex: groupQuestions[0].globalIndex,
         endIndex: groupQuestions[groupQuestions.length - 1].globalIndex
       };
@@ -318,6 +338,189 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const currentGroup = groups[currentGroupIndex];
   const currentQuestion = currentGroup?.questions[currentQuestionIndex];
   const selectedAnswer = currentQuestion ? answers.get(getAnswerKey(currentGroup.id, currentQuestion.id)) : null;
+  const currentSubmitControl = getSubmitControlForGroup(currentGroup);
+
+  // Check if current group has a break configured
+  const shouldShowBreakAfterGroup = (group: GroupInfo): boolean => {
+    return group.breakAfter?.enabled === true;
+  };
+
+  // Handler for when time expires (auto-submit for current group)
+  const handleGroupTimeExpired = () => {
+    const submitControl = currentSubmitControl;
+    if (submitControl.mode === 'auto-only' || submitControl.mode === 'after-time') {
+      // Auto-submit to next group or finish exam
+      moveToNextGroupOrSubmit();
+    }
+  };
+
+  // Move to next group or submit the exam
+  const moveToNextGroupOrSubmit = () => {
+    if (!currentGroup) return;
+    
+    // Check if there's a break after current group
+    if (shouldShowBreakAfterGroup(currentGroup)) {
+      setPendingBreakConfig(currentGroup.breakAfter!);
+      setPendingGroupName(currentGroup.name);
+      setPendingGroupPath(currentGroup.path.join(' > '));
+      setPendingNextGroupIndex(currentGroupIndex + 1);
+      setShowBreakScreen(true);
+      return;
+    }
+    
+    // Move to next group
+    if (currentGroupIndex < groups.length - 1) {
+      setCurrentGroupIndex(currentGroupIndex + 1);
+      setCurrentQuestionIndex(0);
+      setGroupStarted(false);
+      setTimeLeft(null);
+    } else {
+      // End of exam - submit
+      saveResult();
+      setSubmitted(true);
+    }
+  };
+
+  // Save result to localStorage
+  const saveResult = () => {
+    const { earnedPoints, totalPoints: totalPointsSum } = calculateScore();
+    const pastExams = JSON.parse(localStorage.getItem('pastExams') || '[]');
+    const hasWrittenQuestions = groups.some(g => g.questions.some(q => q.type === 'WRITTEN'));
+    const answeredCount = getAnsweredCount();
+    
+    pastExams.push({
+      id: Date.now().toString(),
+      title: (examData as any).title || 'Untitled Exam',
+      subject: (examData as any).subject || 'General',
+      score: earnedPoints,
+      maxScore: totalPointsSum,
+      answered: answeredCount,
+      totalQuestions: totalQuestions,
+      date: new Date().toISOString(),
+      status: hasWrittenQuestions ? 'pending_review' : 'completed',
+      answers: Array.from(answers.entries()),
+    });
+    localStorage.setItem('pastExams', JSON.stringify(pastExams));
+  };
+
+  const handleSubmitExam = () => {
+    // Check if manual submit is allowed for current group
+    if (currentSubmitControl.mode === 'auto-only') {
+      alert('This section does not allow manual submission. The exam will advance automatically when the time expires.');
+      return;
+    }
+    
+    // Check if we're at the end of the exam
+    if (currentGroupIndex === groups.length - 1 && 
+        currentQuestionIndex === currentGroup?.questions.length - 1) {
+      saveResult();
+      setSubmitted(true);
+    } else {
+      moveToNextGroupOrSubmit();
+    }
+  };
+
+  const calculateScore = () => {
+    let earnedPoints = 0;
+    let totalPointsSum = 0;
+
+    for (const group of groups) {
+      for (const q of group.questions) {
+        totalPointsSum += q.points;
+        const answer = answers.get(getAnswerKey(q.groupId, q.id));
+
+        if (q.type === 'MCQ') {
+          const originalQ = q.originalQuestion as Question;
+          const legacyQ = q.originalQuestion as LegacyQuestion;
+          
+          if (originalQ.correctOptions) {
+            const selectedOptionText = answer as string;
+            if (originalQ.correctOptions.includes(selectedOptionText)) {
+              earnedPoints += q.points;
+            }
+          } else if (legacyQ.correctAnswer !== undefined) {
+            const selectedIndex = answer as number;
+            if (selectedIndex === legacyQ.correctAnswer) {
+              earnedPoints += q.points;
+            }
+          }
+        }
+      }
+    }
+
+    return { earnedPoints, totalPoints: totalPointsSum };
+  };
+
+  const getAnsweredCount = () => {
+    let count = 0;
+    for (const group of groups) {
+      for (const q of group.questions) {
+        if (answers.has(getAnswerKey(q.groupId, q.id))) {
+          count++;
+        }
+      }
+    }
+    return count;
+  };
+
+  const handleAnswerSelect = (answer: string | number) => {
+    if (!currentQuestion) return;
+    const newAnswers = new Map(answers);
+    newAnswers.set(getAnswerKey(currentGroup.id, currentQuestion.id), answer);
+    setAnswers(newAnswers);
+  };
+
+  const handleNextQuestion = () => {
+    if (!currentGroup) return;
+    
+    // Move to next question in current group
+    if (currentQuestionIndex < currentGroup.questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    } else {
+      // End of group - check submit control mode
+      if (currentSubmitControl.mode === 'auto-only') {
+        // In auto-only mode, we don't automatically move to next group
+        // The user must wait for timer or we auto-advance on timer expiry
+        alert('This section requires you to complete all questions before the time expires. The exam will advance automatically when time is up.');
+        return;
+      }
+      
+      // For early mode, move to next group or break
+      moveToNextGroupOrSubmit();
+    }
+  };
+
+  const handlePreviousQuestion = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(currentQuestionIndex - 1);
+    } else if (currentGroupIndex > 0) {
+      setCurrentGroupIndex(currentGroupIndex - 1);
+      setCurrentQuestionIndex(groups[currentGroupIndex - 1].questions.length - 1);
+    }
+  };
+
+  const handleGroupStart = () => {
+    setGroupStarted(true);
+  };
+
+  const handleBreakComplete = () => {
+    setShowBreakScreen(false);
+    setPendingBreakConfig(null);
+    setPendingGroupName('');
+    setPendingGroupPath('');
+    
+    // Move to next group after break
+    if (pendingNextGroupIndex !== null && pendingNextGroupIndex < groups.length) {
+      setCurrentGroupIndex(pendingNextGroupIndex);
+      setCurrentQuestionIndex(0);
+      setGroupStarted(false);
+      setTimeLeft(null);
+      setPendingNextGroupIndex(null);
+    } else if (pendingNextGroupIndex !== null && pendingNextGroupIndex >= groups.length) {
+      saveResult();
+      setSubmitted(true);
+    }
+  };
 
   // Shuffle MCQ options ONLY
   useEffect(() => {
@@ -368,7 +571,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     setShuffledOptions(optionsMap);
   }, [groups, examData]);
 
-  // Timer effect
+  // Timer effect - handles auto-submit on expiration for current group
   useEffect(() => {
     if (!examStarted || !groupStarted || submitted || timeLeft === null || timeLeft <= 0) return;
 
@@ -376,7 +579,8 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       setTimeLeft((prev) => {
         if (prev === null || prev <= 1) {
           clearInterval(timer);
-          handleSubmit();
+          // Time expired for this group!
+          handleGroupTimeExpired();
           return 0;
         }
         if (currentGroup) {
@@ -417,147 +621,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     }
   }, [groups, totalQuestions, loading]);
 
-  const calculateScore = () => {
-    let earnedPoints = 0;
-    let totalPointsSum = 0;
-
-    for (const group of groups) {
-      for (const q of group.questions) {
-        totalPointsSum += q.points;
-        const answer = answers.get(getAnswerKey(q.groupId, q.id));
-
-        if (q.type === 'MCQ') {
-          const originalQ = q.originalQuestion as Question;
-          const legacyQ = q.originalQuestion as LegacyQuestion;
-          
-          if (originalQ.correctOptions) {
-            const selectedOptionText = answer as string;
-            if (originalQ.correctOptions.includes(selectedOptionText)) {
-              earnedPoints += q.points;
-            }
-          } else if (legacyQ.correctAnswer !== undefined) {
-            const selectedIndex = answer as number;
-            if (selectedIndex === legacyQ.correctAnswer) {
-              earnedPoints += q.points;
-            }
-          }
-        }
-      }
-    }
-
-    return { earnedPoints, totalPoints: totalPointsSum };
-  };
-
-  const getAnsweredCount = () => {
-    let count = 0;
-    for (const group of groups) {
-      for (const q of group.questions) {
-        if (answers.has(getAnswerKey(q.groupId, q.id))) {
-          count++;
-        }
-      }
-    }
-    return count;
-  };
-
-  const saveResult = () => {
-    const { earnedPoints, totalPoints: totalPointsSum } = calculateScore();
-    const pastExams = JSON.parse(localStorage.getItem('pastExams') || '[]');
-    const hasWrittenQuestions = groups.some(g => g.questions.some(q => q.type === 'WRITTEN'));
-    const answeredCount = getAnsweredCount();
-    
-    pastExams.push({
-      id: Date.now().toString(),
-      title: (examData as any).title || 'Untitled Exam',
-      subject: (examData as any).subject || 'General',
-      score: earnedPoints,
-      maxScore: totalPointsSum,
-      answered: answeredCount,
-      totalQuestions: totalQuestions,
-      date: new Date().toISOString(),
-      status: hasWrittenQuestions ? 'pending_review' : 'completed',
-      answers: Array.from(answers.entries()),
-    });
-    localStorage.setItem('pastExams', JSON.stringify(pastExams));
-  };
-
-  const handleSubmit = () => {
-    saveResult();
-    setSubmitted(true);
-  };
-
-  const handleAnswerSelect = (answer: string | number) => {
-    if (!currentQuestion) return;
-    const newAnswers = new Map(answers);
-    newAnswers.set(getAnswerKey(currentGroup.id, currentQuestion.id), answer);
-    setAnswers(newAnswers);
-  };
-
-  const handleNextQuestion = () => {
-    if (!currentGroup) return;
-    
-    // Move to next question in current group
-    if (currentQuestionIndex < currentGroup.questions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else {
-      // End of group - check for break
-      if (currentGroup.breakAfter?.enabled) {
-        setPendingBreakConfig(currentGroup.breakAfter);
-        setPendingGroupName(currentGroup.name);
-        setPendingGroupPath(currentGroup.path.join(' > '));
-        setPendingNextGroupIndex(currentGroupIndex + 1);
-        setShowBreakScreen(true);
-        return;
-      }
-      
-      // Move to next group
-      if (currentGroupIndex < groups.length - 1) {
-        setCurrentGroupIndex(currentGroupIndex + 1);
-        setCurrentQuestionIndex(0);
-        setGroupStarted(false);
-        setTimeLeft(null);
-      } else {
-        handleSubmit();
-      }
-    }
-  };
-
-  const handlePreviousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    } else if (currentGroupIndex > 0) {
-      setCurrentGroupIndex(currentGroupIndex - 1);
-      setCurrentQuestionIndex(groups[currentGroupIndex - 1].questions.length - 1);
-    }
-  };
-
-  const handleGroupStart = () => {
-    setGroupStarted(true);
-  };
-
-  const handleBreakComplete = () => {
-    setShowBreakScreen(false);
-    setPendingBreakConfig(null);
-    setPendingGroupName('');
-    setPendingGroupPath('');
-    
-    // Move to next group after break
-    if (pendingNextGroupIndex !== null && pendingNextGroupIndex < groups.length) {
-      setCurrentGroupIndex(pendingNextGroupIndex);
-      setCurrentQuestionIndex(0);
-      setGroupStarted(false);
-      setTimeLeft(null);
-      setPendingNextGroupIndex(null);
-    } else if (pendingNextGroupIndex !== null && pendingNextGroupIndex >= groups.length) {
-      handleSubmit();
-    }
-  };
-
   const currentPathDisplay = currentGroup?.path.join(' > ') || '';
   const currentGroupProgress = currentGroup ? `${currentQuestionIndex + 1} of ${currentGroup.questions.length}` : '';
   const answeredCount = getAnsweredCount();
-  const minutes = timeLeft !== null ? Math.floor(timeLeft / 60) : 0;
-  const seconds = timeLeft !== null ? timeLeft % 60 : 0;
   const isWarning = timeLeft !== null && timeLeft <= warningThreshold;
   
   const currentShuffled = currentQuestion?.type === 'MCQ' 
@@ -575,15 +641,27 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     return formatTimeDisplay(timeLeft);
   };
 
+  // Check if manual submit button should be shown
+  const showManualSubmitButton = currentSubmitControl.mode !== 'auto-only';
+  
+  // Check if "Submit" button text should be shown on next button
+  const isLastQuestion = currentGroupIndex === groups.length - 1 && 
+                         currentQuestionIndex === currentGroup?.questions.length - 1;
+  const nextButtonText = isLastQuestion 
+    ? (showManualSubmitButton ? 'Submit Exam' : 'Complete')
+    : 'Next →';
+
   // Break screen
   if (showBreakScreen && pendingBreakConfig) {
     return (
-      <BreakScreen
-        breakConfig={pendingBreakConfig}
-        groupName={pendingGroupName}
-        groupPath={pendingGroupPath}
-        onContinue={handleBreakComplete}
-      />
+      <div style={{ fontFamily: 'Roboto, sans-serif' }}>
+        <BreakScreen
+          breakConfig={pendingBreakConfig}
+          groupName={pendingGroupName}
+          groupPath={pendingGroupPath}
+          onContinue={handleBreakComplete}
+        />
+      </div>
     );
   }
 
@@ -593,22 +671,30 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     const hasTimeLimit = currentGroup.timeLimit?.enabled && !currentGroup.timeLimit?.untimed;
     const timeDisplay = hasTimeLimit ? `${currentGroup.timeLimit?.minutes} minutes` : (currentGroup.timeLimit?.untimed ? 'Untimed' : 'No limit');
     
+    // Show submission mode hint on group start screen
+    const submissionHint = currentSubmitControl.mode === 'auto-only' 
+      ? 'This section will auto-advance when time expires. You cannot manually submit.'
+      : (currentSubmitControl.mode === 'after-time' 
+        ? `This section will auto-advance after ${currentSubmitControl.afterMinutes} minutes of inactivity.`
+        : 'You may advance to the next section when finished.');
+    
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
-        <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
-          <div style={{ fontSize: '20px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
+        <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
+          <div style={{ fontSize: '20px', color: '#ffffff' }}>
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '40px 20px', minHeight: 'calc(100vh - 60px)' }}>
           <div style={{ textAlign: 'center', maxWidth: '500px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{currentGroup.name}</h1>
-            <div style={{ fontSize: '14px', color: '#666666', marginBottom: '24px', fontFamily: 'Roboto, sans-serif' }}>{currentGroup.path.join(' > ')}</div>
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'Roboto, sans-serif', marginBottom: '16px', color: '#000000' }}>{currentGroup.name}</h1>
+            <div style={{ fontSize: '14px', color: '#666666', marginBottom: '24px' }}>{currentGroup.path.join(' > ')}</div>
             <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Format:</strong> {currentGroup.questions.length} questions, {totalGroupPoints} points</p>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Time Limit:</strong> {timeDisplay}</p>
+              <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Format:</strong> {currentGroup.questions.length} questions, {totalGroupPoints} points</p>
+              <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Time Limit:</strong> {timeDisplay}</p>
+              <p style={{ marginBottom: '0', color: '#666666', fontSize: '12px' }}>{submissionHint}</p>
             </div>
-            <button onClick={handleGroupStart} style={{ padding: '12px 24px', backgroundColor: '#00c462', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', fontFamily: 'Roboto, sans-serif' }}>Start {currentGroup.name}</button>
+            <button onClick={handleGroupStart} style={{ padding: '12px 24px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>Start {currentGroup.name}</button>
           </div>
         </div>
       </div>
@@ -621,7 +707,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '24px', marginBottom: '16px' }}>Loading exam...</div>
-          <div style={{ width: '40px', height: '40px', border: '3px solid #00c462', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+          <div style={{ width: '40px', height: '40px', border: '3px solid #00b000', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
@@ -632,7 +718,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   if (error) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
-        <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
+        <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
           <div style={{ fontSize: '20px', color: '#ffffff' }}>
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
@@ -641,7 +727,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           <div style={{ textAlign: 'center', maxWidth: '500px' }}>
             <h1 style={{ color: '#c62828', marginBottom: '16px' }}>Error</h1>
             <p style={{ marginBottom: '24px', color: '#000000' }}>{error}</p>
-            <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00c462', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Go Back</button>
+            <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Go Back</button>
           </div>
         </div>
       </div>
@@ -662,31 +748,25 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
-        <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
+        <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ fontSize: '20px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
+            <div style={{ fontSize: '20px', color: '#ffffff' }}>
               <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
-            </div>
-            <div style={{ fontSize: '14px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
-              {/* Empty */}
-            </div>
-            <div style={{ fontSize: '14px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
-              {/* Empty */}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '40px 20px', minHeight: 'calc(100vh - 60px)' }}>
           <div style={{ textAlign: 'center', maxWidth: '500px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{examTitle}</h1>
-            {examDescription && <p style={{ marginBottom: '16px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>{examDescription}</p>}
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'Roboto, sans-serif', marginBottom: '16px', color: '#000000' }}>{examTitle}</h1>
+            {examDescription && <p style={{ marginBottom: '16px', color: '#666666' }}>{examDescription}</p>}
             <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Format:</strong> {groups.length} sections, {totalQuestions} questions, {totalPoints} points</p>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Global Time Limit:</strong> {globalTimeDisplay}</p>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Security Level:</strong> {securityLevel}</p>
-              <p style={{ marginBottom: '8px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Shuffle Answers:</strong> {shuffleAnswers ? 'Yes' : 'No'}</p>
-              {passingScore && <p style={{ color: '#000000', fontFamily: 'Roboto, sans-serif' }}><strong>Passing Score:</strong> {passingScore}%</p>}
+              <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Format:</strong> {groups.length} sections, {totalQuestions} questions, {totalPoints} points</p>
+              <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Global Time Limit:</strong> {globalTimeDisplay}</p>
+              <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Security Level:</strong> {securityLevel}</p>
+              <p style={{ marginBottom: '0', color: '#000000' }}><strong>Shuffle Answers:</strong> {shuffleAnswers ? 'Yes' : 'No'}</p>
+              {passingScore && <p style={{ marginTop: '8px', color: '#000000' }}><strong>Passing Score:</strong> {passingScore}%</p>}
             </div>
-            <button onClick={() => setExamStarted(true)} style={{ padding: '12px 24px', backgroundColor: '#00c462', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', fontFamily: 'Roboto, sans-serif' }}>Start Exam</button>
+            <button onClick={() => setExamStarted(true)} style={{ padding: '12px 24px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>Start Exam</button>
           </div>
         </div>
       </div>
@@ -727,7 +807,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             <li>You may not return to this exam.</li>
             {hasWrittenQuestions && <li>Your written responses will be reviewed manually.</li>}
           </ul>
-          <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00c462', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Exit</button>
+          <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Exit</button>
         </div>
       </div>
     );
@@ -736,7 +816,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   if (groups.length === 0 || !currentGroup || !currentQuestion) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
-        <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
+        <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
           <div style={{ fontSize: '20px', color: '#ffffff' }}>
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
@@ -745,7 +825,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           <div style={{ textAlign: 'center', maxWidth: '500px' }}>
             <h1 style={{ color: '#c62828', marginBottom: '16px' }}>No Questions</h1>
             <p style={{ marginBottom: '24px', color: '#000000' }}>This exam has no questions. Please add questions to the exam first.</p>
-            <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00c462', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Go Back</button>
+            <button onClick={onComplete} style={{ padding: '10px 20px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Go Back</button>
           </div>
         </div>
       </div>
@@ -756,31 +836,31 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   return (
     <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
       {/* Top bar - green */}
-      <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
+      <div style={{ backgroundColor: '#00b000', padding: '12px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <div style={{ fontSize: '20px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
+          <div style={{ fontSize: '20px', color: '#ffffff' }}>
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
-          <div style={{ fontSize: isWarning ? '20px' : '18px', fontWeight: 'bold', color: isWarning ? '#ff0000' : '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
+          <div style={{ fontSize: isWarning ? '20px' : '18px', fontWeight: 'bold', color: isWarning ? '#ff0000' : '#ffffff' }}>
             {getTimeDisplay()}
           </div>
         </div>
       </div>
 
-      {/* Main content - white background, black text */}
+      {/* Main content */}
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '40px 24px' }}>
         {/* Breadcrumb */}
-        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666' }}>
           {currentPathDisplay}
         </div>
         
         {/* Progress */}
-        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666' }}>
           {currentGroupProgress} • {currentQuestion?.points} pts
         </div>
         
         {/* Question text */}
-        <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000' }}>
           {currentQuestion.text}
         </h2>
 
@@ -812,11 +892,11 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
                         handleAnswerSelect(idx);
                       }
                     }}
-                    style={{ marginRight: '12px', marginTop: '2px', width: '18px', height: '18px', accentColor: '#00c462', cursor: 'pointer' }}
+                    style={{ marginRight: '12px', marginTop: '2px', width: '18px', height: '18px', accentColor: '#00b000', cursor: 'pointer' }}
                   />
-                  <label htmlFor={`opt_${idx}`} style={{ fontSize: '16px', cursor: 'pointer', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
-                    <strong style={{ color: isFixed ? '#00c462' : '#000000' }}>{letter}.</strong> {opt}
-                    {isFixed && <span style={{ marginLeft: '8px', fontSize: '11px', color: '#00c462' }}>(fixed)</span>}
+                  <label htmlFor={`opt_${idx}`} style={{ fontSize: '16px', cursor: 'pointer', color: '#000000' }}>
+                    <strong style={{ color: isFixed ? '#00b000' : '#000000' }}>{letter}.</strong> {opt}
+                    {isFixed && <span style={{ marginLeft: '8px', fontSize: '11px', color: '#00b000' }}>(fixed)</span>}
                   </label>
                 </div>
               );
@@ -835,9 +915,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
                   id={`opt_${idx}`}
                   checked={selectedAnswer === idx}
                   onChange={() => handleAnswerSelect(idx)}
-                  style={{ marginRight: '12px', width: '18px', height: '18px', accentColor: '#00c462', cursor: 'pointer' }}
+                  style={{ marginRight: '12px', width: '18px', height: '18px', accentColor: '#00b000', cursor: 'pointer' }}
                 />
-                <label htmlFor={`opt_${idx}`} style={{ fontSize: '16px', cursor: 'pointer', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+                <label htmlFor={`opt_${idx}`} style={{ fontSize: '16px', cursor: 'pointer', color: '#000000' }}>
                   <strong>{String.fromCharCode(65 + idx)}.</strong> {opt}
                 </label>
               </div>
@@ -850,7 +930,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           <div>
             {(currentQuestion.originalQuestion as Question).limits && (
               <div style={{ marginBottom: '16px', padding: '8px 12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
-                <p style={{ fontSize: '12px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>
+                <p style={{ fontSize: '12px', color: '#666666' }}>
                   <strong>Response limits:</strong>{' '}
                   {(currentQuestion.originalQuestion as Question).limits?.mode === 'characters' && `Character limit`}
                   {(currentQuestion.originalQuestion as Question).limits?.mode === 'words' && `Word limit`}
@@ -868,7 +948,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
               placeholder="Type your answer here..."
             />
             {(currentQuestion.originalQuestion as Question).limits?.max && (
-              <div style={{ marginTop: '8px', fontSize: '11px', color: '#666666', textAlign: 'right', fontFamily: 'Roboto, sans-serif' }}>
+              <div style={{ marginTop: '8px', fontSize: '11px', color: '#666666', textAlign: 'right' }}>
                 {typeof selectedAnswer === 'string' ? selectedAnswer.length : 0} / {(currentQuestion.originalQuestion as Question).limits?.max} {(currentQuestion.originalQuestion as Question).limits?.mode === 'characters' ? 'characters' : 'words'}
               </div>
             )}
@@ -882,7 +962,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             disabled={currentGroupIndex === 0 && currentQuestionIndex === 0}
             style={{
               padding: '10px 20px',
-              backgroundColor: (currentGroupIndex === 0 && currentQuestionIndex === 0) ? '#ccc' : '#00c462',
+              backgroundColor: (currentGroupIndex === 0 && currentQuestionIndex === 0) ? '#ccc' : '#00b000',
               color: '#ffffff',
               border: 'none',
               borderRadius: '4px',
@@ -898,7 +978,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             onClick={handleNextQuestion}
             style={{
               padding: '10px 20px',
-              backgroundColor: '#00c462',
+              backgroundColor: '#00b000',
               color: '#ffffff',
               border: 'none',
               borderRadius: '4px',
@@ -908,9 +988,17 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
               fontFamily: 'Roboto, sans-serif'
             }}
           >
-            {(currentGroupIndex === groups.length - 1 && currentQuestionIndex === currentGroup.questions.length - 1) ? 'Submit' : 'Next →'}
+            {nextButtonText}
           </button>
         </div>
+        
+        {/* Auto-only submission notice */}
+        {currentSubmitControl.mode === 'auto-only' && (
+          <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#ff9800' }}>
+            ⏱️ This section will auto-advance when the timer expires.
+            {isLastQuestion && ' The exam will submit automatically.'}
+          </div>
+        )}
       </div>
     </div>
   );
