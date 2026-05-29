@@ -29,7 +29,7 @@ LibreTest is its own entity. The "Libre" prefix reflects the philosophy of free 
 ## Features
 
 - JSON exam making
-- Base Studio
+- Functioning Studio
 - Fully functioning Player (except results)
 - Multiple choice exams
 - Essay question support
@@ -39,6 +39,7 @@ LibreTest is its own entity. The "Libre" prefix reflects the philosophy of free 
 - Pre-Start Screen
 - Auto-submit on timeout
 - Roboto font everywhere
+- Section-by-section, module-by-module testing
 - More to come soon...
 
 ## Getting Started

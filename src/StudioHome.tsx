@@ -33,28 +33,35 @@ interface QuestionBank {
   createdAt: number;
 }
 
+interface TimeLimit {
+  enabled: boolean;
+  untimed: boolean;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+interface GroupTimeLimit {
+  groupId: string;
+  groupName: string;
+  groupPath: string;
+  timeLimit: TimeLimit;
+}
+
 interface GroupNode {
   id: string;
   name: string;
   type: 'section' | 'module' | 'submodule';
   groups: GroupNode[];
   questions: ExamQuestion[];
-  timeLimit?: {
-    days: number;
-    hours: number;
-    minutes: number;
-    seconds: number;
-  };
+  timeLimit?: TimeLimit;
 }
 
 interface ExamCondition {
   securityLevel: 'Open' | 'Protected' | 'Secure' | 'Very Secure' | 'Lockdown';
-  timeLimit?: {
-    days: number;
-    hours: number;
-    minutes: number;
-    seconds: number;
-  };
+  globalTimeLimit: TimeLimit;
+  groupTimeLimits: GroupTimeLimit[];
   passingScore?: number;
   questionOrderMode: 'manual' | 'auto';
 }
@@ -84,10 +91,9 @@ interface Settings {
   language: 'en' | 'es';
 }
 
-// Spanish translations
 const t = (key: string, lang: 'en' | 'es'): string => {
   const translations: Record<string, Record<'en' | 'es', string>> = {
-    'studio': { en: 'Studio', es: 'Estudio' },
+    'studio': { en: 'Studio', es: 'Studio' },
     'home': { en: 'Home', es: 'Inicio' },
     'admin': { en: 'Admin', es: 'Admin' },
     'questions': { en: 'Questions', es: 'Preguntas' },
@@ -154,16 +160,21 @@ const t = (key: string, lang: 'en' | 'es'): string => {
     'select_bank_to_import': { en: 'Select a bank to import ALL its questions into this group.', es: 'Selecciona un banco para importar TODAS sus preguntas a este grupo.' },
     'import_to_group': { en: 'Import to Group', es: 'Importar al Grupo' },
     'time_limit': { en: 'Time Limit', es: 'Límite de Tiempo' },
+    'global_time_limit': { en: 'Global Time Limit (fallback)', es: 'Límite de Tiempo Global (respaldo)' },
+    'group_time_limits': { en: 'Group Time Limits', es: 'Límites de Tiempo por Grupo' },
+    'enable_time_limit': { en: 'Enable custom time limit', es: 'Habilitar límite personalizado' },
+    'untimed': { en: 'Untimed', es: 'Sin límite' },
     'days': { en: 'days', es: 'días' },
     'hours': { en: 'hours', es: 'horas' },
     'minutes': { en: 'minutes', es: 'minutos' },
     'seconds': { en: 'seconds', es: 'segundos' },
     'no_limit': { en: 'No limit', es: 'Sin límite' },
+    'inherits_from_parent': { en: 'Inherits from parent', es: 'Hereda del padre' },
     'passing_score': { en: 'Passing Score (%)', es: 'Puntaje Aprobatorio (%)' },
     'optional': { en: 'Optional', es: 'Opcional' },
-    'question_order': { en: 'Question Order (within groups)', es: 'Orden de Preguntas (dentro de grupos)' },
-    'manual_order': { en: 'Manual (instructor order within groups)', es: 'Manual (orden del instructor dentro de grupos)' },
-    'auto_order': { en: 'Auto-generate (randomize per student within groups)', es: 'Auto-generar (aleatorio por estudiante dentro de grupos)' },
+    'question_order': { en: 'Question Order', es: 'Orden de Preguntas' },
+    'manual_order': { en: 'Manual (instructor order)', es: 'Manual (orden del instructor)' },
+    'auto_order': { en: 'Auto-generate (randomize per student)', es: 'Auto-generar (aleatorio por estudiante)' },
     'security_level': { en: 'Security Level (CBT)', es: 'Nivel de Seguridad (CBT)' },
     'export_json': { en: 'Export this exam to JSON format for use with LibreTest Player.', es: 'Exporta este examen a formato JSON para usar con LibreTest Player.' },
     'download_json': { en: 'Download JSON', es: 'Descargar JSON' },
@@ -318,7 +329,8 @@ const placeholderExamsData: Exam[] = [
     subject: 'Mathematics',
     conditions: {
       securityLevel: 'Open',
-      timeLimit: { days: 0, hours: 1, minutes: 30, seconds: 0 },
+      globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 1, minutes: 30, seconds: 0 },
+      groupTimeLimits: [],
       passingScore: 70,
       questionOrderMode: 'auto'
     },
@@ -333,7 +345,8 @@ const placeholderExamsData: Exam[] = [
     subject: 'Science',
     conditions: {
       securityLevel: 'Open',
-      timeLimit: { days: 0, hours: 1, minutes: 0, seconds: 0 },
+      globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 1, minutes: 0, seconds: 0 },
+      groupTimeLimits: [],
       passingScore: 60,
       questionOrderMode: 'manual'
     },
@@ -581,7 +594,8 @@ export function StudioHome() {
       subject: '',
       conditions: {
         securityLevel: 'Open',
-        timeLimit: { days: 0, hours: 0, minutes: 0, seconds: 0 },
+        globalTimeLimit: { enabled: true, untimed: false, days: 0, hours: 0, minutes: 0, seconds: 0 },
+        groupTimeLimits: [],
         passingScore: undefined,
         questionOrderMode: 'auto'
       },
@@ -704,8 +718,14 @@ export function StudioHome() {
         return true;
       });
     };
+    // Also remove from groupTimeLimits
+    const newGroupTimeLimits = editingExam.conditions.groupTimeLimits.filter(gtl => gtl.groupId !== groupId);
     setEditingExam({
       ...editingExam,
+      conditions: {
+        ...editingExam.conditions,
+        groupTimeLimits: newGroupTimeLimits
+      },
       sections: deleteFromGroups(editingExam.sections)
     });
   };
@@ -715,6 +735,17 @@ export function StudioHome() {
     const updateName = (groups: GroupNode[]): GroupNode[] => {
       return groups.map(group => {
         if (group.id === groupId) {
+          // Update name in groupTimeLimits too
+          const newGroupTimeLimits = editingExam.conditions.groupTimeLimits.map(gtl =>
+            gtl.groupId === groupId ? { ...gtl, groupName: name } : gtl
+          );
+          setEditingExam({
+            ...editingExam,
+            conditions: {
+              ...editingExam.conditions,
+              groupTimeLimits: newGroupTimeLimits
+            }
+          });
           return { ...group, name };
         }
         if (group.groups.length > 0) {
@@ -860,7 +891,8 @@ export function StudioHome() {
   const handleExportExam = () => {
     if (!selectedExam) return;
     const exportData = {
-      version: '0.3.4',
+      version: '0.3.6',
+      format: 'libretest-exam',
       exam: {
         id: selectedExam.id,
         title: selectedExam.title,
@@ -901,14 +933,199 @@ export function StudioHome() {
     return securityLevelColors[level as keyof typeof securityLevelColors] || '#666';
   };
 
-  const formatTimeLimit = (time?: { days: number; hours: number; minutes: number; seconds: number }) => {
-    if (!time) return t('no_limit', lang);
+  const formatTimeLimitDisplay = (time: TimeLimit): string => {
+    if (!time.enabled) return t('no_limit', lang);
+    if (time.untimed) return t('untimed', lang);
     const parts = [];
     if (time.days > 0) parts.push(`${time.days}${t('days', lang).charAt(0)}`);
     if (time.hours > 0) parts.push(`${time.hours}${t('hours', lang).charAt(0)}`);
     if (time.minutes > 0) parts.push(`${time.minutes}${t('minutes', lang).charAt(0)}`);
     if (time.seconds > 0) parts.push(`${time.seconds}${t('seconds', lang).charAt(0)}`);
     return parts.length > 0 ? parts.join(' ') : t('no_limit', lang);
+  };
+
+  const findGroupById = (groups: GroupNode[], groupId: string): GroupNode | null => {
+    for (const group of groups) {
+      if (group.id === groupId) return group;
+      if (group.groups.length > 0) {
+        const found = findGroupById(group.groups, groupId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const findGroupPath = (groups: GroupNode[], groupId: string, currentPath: string = ''): string => {
+    for (const group of groups) {
+      const path = currentPath ? `${currentPath} > ${group.name}` : group.name;
+      if (group.id === groupId) return path;
+      if (group.groups.length > 0) {
+        const found = findGroupPath(group.groups, groupId, path);
+        if (found) return found;
+      }
+    }
+    return '';
+  };
+
+  const handleUpdateGroupTimeLimit = (groupId: string, timeLimit: TimeLimit) => {
+    if (!editingExam) return;
+    
+    // Update the group's timeLimit property
+    const updateGroupTimeLimit = (groups: GroupNode[]): GroupNode[] => {
+      return groups.map(group => {
+        if (group.id === groupId) {
+          return { ...group, timeLimit };
+        }
+        if (group.groups.length > 0) {
+          return { ...group, groups: updateGroupTimeLimit(group.groups) };
+        }
+        return group;
+      });
+    };
+    
+    // Also update the conditions.groupTimeLimits for easy access
+    const groupPath = findGroupPath(editingExam.sections, groupId);
+    const group = findGroupById(editingExam.sections, groupId);
+    const newGroupTimeLimits = [...editingExam.conditions.groupTimeLimits];
+    const existingIndex = newGroupTimeLimits.findIndex(gtl => gtl.groupId === groupId);
+    
+    const groupTimeLimit: GroupTimeLimit = {
+      groupId,
+      groupName: group?.name || '',
+      groupPath: groupPath || '',
+      timeLimit
+    };
+    
+    if (existingIndex >= 0) {
+      if (timeLimit.enabled) {
+        newGroupTimeLimits[existingIndex] = groupTimeLimit;
+      } else {
+        newGroupTimeLimits.splice(existingIndex, 1);
+      }
+    } else if (timeLimit.enabled) {
+      newGroupTimeLimits.push(groupTimeLimit);
+    }
+    
+    setEditingExam({
+      ...editingExam,
+      conditions: {
+        ...editingExam.conditions,
+        groupTimeLimits: newGroupTimeLimits
+      },
+      sections: updateGroupTimeLimit(editingExam.sections)
+    });
+  };
+
+  const getGroupTimeLimit = (groupId: string): TimeLimit | undefined => {
+    if (!editingExam) return undefined;
+    const group = findGroupById(editingExam.sections, groupId);
+    if (group?.timeLimit?.enabled) return group.timeLimit;
+    return editingExam.conditions.groupTimeLimits.find(gtl => gtl.groupId === groupId)?.timeLimit;
+  };
+
+  const renderTimeLimitEditor = (group: GroupNode, path: string, level: number): JSX.Element => {
+    const timeLimit = getGroupTimeLimit(group.id) || { enabled: false, untimed: false, days: 0, hours: 0, minutes: 60, seconds: 0 };
+    const isEnabled = timeLimit.enabled;
+    const isUntimed = timeLimit.untimed;
+    
+    return (
+      <div key={group.id} style={{ marginLeft: level * 24, marginBottom: '16px', padding: '12px', border: '1px solid #e0e0e0', borderRadius: '6px', backgroundColor: '#ffffff' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <span style={{ fontWeight: 'bold', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{group.name}</span>
+            <span style={{ fontSize: '11px', color: '#999999', fontFamily: 'Roboto, sans-serif', marginLeft: '12px' }}>{path}</span>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+            <input
+              type="checkbox"
+              checked={isEnabled}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  handleUpdateGroupTimeLimit(group.id, { enabled: true, untimed: false, days: 0, hours: 0, minutes: 60, seconds: 0 });
+                } else {
+                  handleUpdateGroupTimeLimit(group.id, { enabled: false, untimed: false, days: 0, hours: 0, minutes: 0, seconds: 0 });
+                }
+              }}
+            />
+            {t('enable_time_limit', lang)}
+          </label>
+        </div>
+        
+        {isEnabled && (
+          <div style={{ marginLeft: '24px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+              <input
+                type="checkbox"
+                checked={isUntimed}
+                onChange={(e) => {
+                  handleUpdateGroupTimeLimit(group.id, {
+                    enabled: true,
+                    untimed: e.target.checked,
+                    days: e.target.checked ? 0 : timeLimit.days,
+                    hours: e.target.checked ? 0 : timeLimit.hours,
+                    minutes: e.target.checked ? 0 : timeLimit.minutes,
+                    seconds: e.target.checked ? 0 : timeLimit.seconds
+                  });
+                }}
+              />
+              {t('untimed', lang)}
+            </label>
+            
+            {!isUntimed && (
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="number" 
+                    value={timeLimit.days}
+                    onChange={(e) => handleUpdateGroupTimeLimit(group.id, { ...timeLimit, enabled: true, days: parseInt(e.target.value) || 0 })}
+                    style={{ width: '60px', padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                    placeholder="0"
+                  />
+                  <span style={{ fontSize: '12px', color: '#666' }}>{t('days', lang)}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="number" 
+                    value={timeLimit.hours}
+                    onChange={(e) => handleUpdateGroupTimeLimit(group.id, { ...timeLimit, enabled: true, hours: parseInt(e.target.value) || 0 })}
+                    style={{ width: '60px', padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                    placeholder="0"
+                  />
+                  <span style={{ fontSize: '12px', color: '#666' }}>{t('hours', lang)}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="number" 
+                    value={timeLimit.minutes}
+                    onChange={(e) => handleUpdateGroupTimeLimit(group.id, { ...timeLimit, enabled: true, minutes: parseInt(e.target.value) || 0 })}
+                    style={{ width: '60px', padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                    placeholder="0"
+                  />
+                  <span style={{ fontSize: '12px', color: '#666' }}>{t('minutes', lang)}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="number" 
+                    value={timeLimit.seconds}
+                    onChange={(e) => handleUpdateGroupTimeLimit(group.id, { ...timeLimit, enabled: true, seconds: parseInt(e.target.value) || 0 })}
+                    style={{ width: '60px', padding: '6px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                    placeholder="0"
+                  />
+                  <span style={{ fontSize: '12px', color: '#666' }}>{t('seconds', lang)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Recursively render child groups */}
+        {group.groups.length > 0 && (
+          <div style={{ marginTop: '12px', marginLeft: '24px' }}>
+            {group.groups.map(childGroup => renderTimeLimitEditor(childGroup, `${path} > ${childGroup.name}`, level + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderGroupTree = (groups: GroupNode[], level: number = 0): JSX.Element[] => {
@@ -918,6 +1135,10 @@ export function StudioHome() {
       
       const addButtonText = level === 0 ? t('new_module', lang) : (level === 1 ? t('new_submodule', lang) : t('new_submodule', lang));
       const addHandler = level === 0 ? () => handleAddModule(group.id) : () => handleAddSubmodule(group.id);
+      
+      const timeLimit = getGroupTimeLimit(group.id);
+      const hasTimeLimit = timeLimit?.enabled === true;
+      const timeLimitDisplay = hasTimeLimit ? (timeLimit?.untimed ? '∞' : formatTimeLimitDisplay(timeLimit!)) : null;
       
       return (
         <div key={group.id} style={{ marginBottom: '16px', marginLeft: level * 24 }}>
@@ -933,7 +1154,8 @@ export function StudioHome() {
               backgroundColor: '#f5f5f5',
               borderRadius: '6px',
               border: `1px solid ${accentColor}`,
-              marginBottom: '8px'
+              marginBottom: '8px',
+              flexWrap: 'wrap'
             }}>
               <button 
                 onClick={() => {
@@ -958,9 +1180,15 @@ export function StudioHome() {
                 type="text" 
                 value={group.name}
                 onChange={(e) => handleUpdateGroupName(group.id, e.target.value)}
-                style={{ flex: 1, background: 'none', border: 'none', fontWeight: 'bold', fontSize: '14px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                style={{ flex: 1, background: 'none', border: 'none', fontWeight: 'bold', fontSize: '14px', fontFamily: 'Roboto, sans-serif', color: '#000000', minWidth: '120px' }}
               />
               <span style={{ fontSize: '11px', color: '#666666', fontFamily: 'Roboto, sans-serif' }}>({totalQuestions} {t('questions_count', lang)})</span>
+              
+              {hasTimeLimit && (
+                <span style={{ fontSize: '10px', backgroundColor: '#e8f5e9', padding: '2px 6px', borderRadius: '4px', color: accentColor, fontFamily: 'Roboto, sans-serif' }}>
+                  ⏱️ {timeLimitDisplay}
+                </span>
+              )}
               
               <button onClick={addHandler} style={{ background: 'none', border: 'none', cursor: 'pointer', color: accentColor, fontSize: '12px', fontFamily: 'Roboto, sans-serif', padding: '4px 8px' }}>
                 {addButtonText}
@@ -1643,91 +1871,159 @@ export function StudioHome() {
                     )}
 
                     {examTab === 'conditions' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div>
-                          <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('time_limit', lang)}</label>
-                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input 
-                                type="number" 
-                                value={editingExam.conditions.timeLimit?.days || 0}
-                                onChange={(e) => setEditingExam({ 
-                                  ...editingExam, 
-                                  conditions: { 
-                                    ...editingExam.conditions, 
-                                    timeLimit: { 
-                                      ...editingExam.conditions.timeLimit || { hours: 0, minutes: 0, seconds: 0 },
-                                      days: parseInt(e.target.value) || 0
-                                    } 
-                                  } 
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                        {/* Global Time Limit */}
+                        <div style={{ padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+                          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('global_time_limit', lang)}</label>
+                          <div>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+                              <input
+                                type="checkbox"
+                                checked={editingExam.conditions.globalTimeLimit?.enabled ?? false}
+                                onChange={(e) => setEditingExam({
+                                  ...editingExam,
+                                  conditions: {
+                                    ...editingExam.conditions,
+                                    globalTimeLimit: {
+                                      ...editingExam.conditions.globalTimeLimit,
+                                      enabled: e.target.checked,
+                                      untimed: e.target.checked ? false : true,
+                                      days: e.target.checked ? (editingExam.conditions.globalTimeLimit?.days || 0) : 0,
+                                      hours: e.target.checked ? (editingExam.conditions.globalTimeLimit?.hours || 0) : 0,
+                                      minutes: e.target.checked ? (editingExam.conditions.globalTimeLimit?.minutes || 60) : 0,
+                                      seconds: e.target.checked ? (editingExam.conditions.globalTimeLimit?.seconds || 0) : 0
+                                    }
+                                  }
                                 })}
-                                style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
-                                placeholder="0"
                               />
-                              <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('days', lang)}</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input 
-                                type="number" 
-                                value={editingExam.conditions.timeLimit?.hours || 0}
-                                onChange={(e) => setEditingExam({ 
-                                  ...editingExam, 
-                                  conditions: { 
-                                    ...editingExam.conditions, 
-                                    timeLimit: { 
-                                      ...editingExam.conditions.timeLimit || { days: 0, minutes: 0, seconds: 0 },
-                                      hours: parseInt(e.target.value) || 0
-                                    } 
-                                  } 
-                                })}
-                                style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
-                                placeholder="0"
-                              />
-                              <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('hours', lang)}</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input 
-                                type="number" 
-                                value={editingExam.conditions.timeLimit?.minutes || 0}
-                                onChange={(e) => setEditingExam({ 
-                                  ...editingExam, 
-                                  conditions: { 
-                                    ...editingExam.conditions, 
-                                    timeLimit: { 
-                                      ...editingExam.conditions.timeLimit || { days: 0, hours: 0, seconds: 0 },
-                                      minutes: parseInt(e.target.value) || 0
-                                    } 
-                                  } 
-                                })}
-                                style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
-                                placeholder="0"
-                              />
-                              <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('minutes', lang)}</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input 
-                                type="number" 
-                                value={editingExam.conditions.timeLimit?.seconds || 0}
-                                onChange={(e) => setEditingExam({ 
-                                  ...editingExam, 
-                                  conditions: { 
-                                    ...editingExam.conditions, 
-                                    timeLimit: { 
-                                      ...editingExam.conditions.timeLimit || { days: 0, hours: 0, minutes: 0 },
-                                      seconds: parseInt(e.target.value) || 0
-                                    } 
-                                  } 
-                                })}
-                                style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
-                                placeholder="0"
-                              />
-                              <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('seconds', lang)}</span>
-                            </div>
+                              Enable global time limit
+                            </label>
+                            
+                            {editingExam.conditions.globalTimeLimit?.enabled && (
+                              <>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={editingExam.conditions.globalTimeLimit?.untimed ?? false}
+                                    onChange={(e) => setEditingExam({
+                                      ...editingExam,
+                                      conditions: {
+                                        ...editingExam.conditions,
+                                        globalTimeLimit: {
+                                          ...editingExam.conditions.globalTimeLimit,
+                                          untimed: e.target.checked,
+                                          days: e.target.checked ? 0 : (editingExam.conditions.globalTimeLimit?.days || 0),
+                                          hours: e.target.checked ? 0 : (editingExam.conditions.globalTimeLimit?.hours || 0),
+                                          minutes: e.target.checked ? 0 : (editingExam.conditions.globalTimeLimit?.minutes || 60),
+                                          seconds: e.target.checked ? 0 : (editingExam.conditions.globalTimeLimit?.seconds || 0)
+                                        }
+                                      }
+                                    })}
+                                  />
+                                  {t('untimed', lang)}
+                                </label>
+                                
+                                {!editingExam.conditions.globalTimeLimit?.untimed && (
+                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input 
+                                        type="number" 
+                                        value={editingExam.conditions.globalTimeLimit?.days || 0}
+                                        onChange={(e) => setEditingExam({ 
+                                          ...editingExam, 
+                                          conditions: { 
+                                            ...editingExam.conditions, 
+                                            globalTimeLimit: { 
+                                              ...editingExam.conditions.globalTimeLimit,
+                                              days: parseInt(e.target.value) || 0
+                                            } 
+                                          } 
+                                        })}
+                                        style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                        placeholder="0"
+                                      />
+                                      <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('days', lang)}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input 
+                                        type="number" 
+                                        value={editingExam.conditions.globalTimeLimit?.hours || 0}
+                                        onChange={(e) => setEditingExam({ 
+                                          ...editingExam, 
+                                          conditions: { 
+                                            ...editingExam.conditions, 
+                                            globalTimeLimit: { 
+                                              ...editingExam.conditions.globalTimeLimit,
+                                              hours: parseInt(e.target.value) || 0
+                                            } 
+                                          } 
+                                        })}
+                                        style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                        placeholder="0"
+                                      />
+                                      <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('hours', lang)}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input 
+                                        type="number" 
+                                        value={editingExam.conditions.globalTimeLimit?.minutes || 0}
+                                        onChange={(e) => setEditingExam({ 
+                                          ...editingExam, 
+                                          conditions: { 
+                                            ...editingExam.conditions, 
+                                            globalTimeLimit: { 
+                                              ...editingExam.conditions.globalTimeLimit,
+                                              minutes: parseInt(e.target.value) || 0
+                                            } 
+                                          } 
+                                        })}
+                                        style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                        placeholder="0"
+                                      />
+                                      <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('minutes', lang)}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input 
+                                        type="number" 
+                                        value={editingExam.conditions.globalTimeLimit?.seconds || 0}
+                                        onChange={(e) => setEditingExam({ 
+                                          ...editingExam, 
+                                          conditions: { 
+                                            ...editingExam.conditions, 
+                                            globalTimeLimit: { 
+                                              ...editingExam.conditions.globalTimeLimit,
+                                              seconds: parseInt(e.target.value) || 0
+                                            } 
+                                          } 
+                                        })}
+                                        style={{ width: '70px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                        placeholder="0"
+                                      />
+                                      <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('seconds', lang)}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            )}
                           </div>
                           <div style={{ fontSize: '11px', color: '#666666', marginTop: '4px', fontFamily: 'Roboto, sans-serif' }}>
-                            {formatTimeLimit(editingExam.conditions.timeLimit)}
+                            {formatTimeLimitDisplay(editingExam.conditions.globalTimeLimit || { enabled: false, untimed: false, days: 0, hours: 0, minutes: 0, seconds: 0 })}
                           </div>
                         </div>
+
+                        {/* Hierarchical Group Time Limits */}
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('group_time_limits', lang)}</label>
+                          <div style={{ fontSize: '13px', color: '#666666', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>
+                            Set custom time limits for any section, module, or submodule. Child groups inherit from parent unless overridden.
+                          </div>
+                          {editingExam.sections.map(section => renderTimeLimitEditor(section, section.name, 0))}
+                          {editingExam.sections.length === 0 && (
+                            <p style={{ color: '#999999', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>No sections yet. Add sections in the Groups tab.</p>
+                          )}
+                        </div>
+
+                        {/* Passing Score */}
                         <div>
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('passing_score', lang)}</label>
                           <input 
@@ -1738,12 +2034,14 @@ export function StudioHome() {
                             placeholder={t('optional', lang)}
                           />
                         </div>
+
+                        {/* Question Order */}
                         <div>
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('question_order', lang)}</label>
                           <select 
                             value={editingExam.conditions.questionOrderMode}
                             onChange={(e) => setEditingExam({ ...editingExam, conditions: { ...editingExam.conditions, questionOrderMode: e.target.value as 'manual' | 'auto' } })}
-                            style={{ width: '300px', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                            style={{ width: '250px', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
                           >
                             <option value="manual">{t('manual_order', lang)}</option>
                             <option value="auto">{t('auto_order', lang)}</option>
@@ -1786,7 +2084,8 @@ export function StudioHome() {
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('preview', lang)}</label>
                           <pre style={{ backgroundColor: '#f5f5f5', padding: '12px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', overflow: 'auto', maxHeight: '300px', color: '#000000' }}>
                             {JSON.stringify({
-                              version: '0.3.4',
+                              version: '0.3.6',
+                              format: 'libretest-exam',
                               exam: {
                                 id: editingExam.id,
                                 title: editingExam.title,
