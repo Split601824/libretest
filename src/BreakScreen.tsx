@@ -22,10 +22,16 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
   useEffect(() => {
     if (breakConfig.durationMinutes !== undefined && breakConfig.durationMinutes > 0) {
       setTimeLeft(breakConfig.durationMinutes * 60);
+      if (breakConfig.allowEarlyContinue) {
+        setCanContinue(true);
+      } else {
+        setCanContinue(false);
+      }
     } else {
       setTimeLeft(null);
+      setCanContinue(true);
     }
-  }, [breakConfig.durationMinutes]);
+  }, [breakConfig.durationMinutes, breakConfig.allowEarlyContinue]);
 
   // Timer countdown
   useEffect(() => {
@@ -34,7 +40,10 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev === null || prev <= 1) {
-          clearInterval(timer);
+          // Timer ended
+          if (!breakConfig.allowEarlyContinue) {
+            onContinue();
+          }
           setCanContinue(true);
           return 0;
         }
@@ -43,19 +52,12 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft]);
-
-  // Handle early continue
-  useEffect(() => {
-    if (breakConfig.allowEarlyContinue) {
-      setCanContinue(true);
-    }
-  }, [breakConfig.allowEarlyContinue]);
+  }, [timeLeft, breakConfig.allowEarlyContinue, onContinue]);
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   const handleContinue = () => {
@@ -64,19 +66,15 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
     }
   };
 
-  // Auto-continue when timer ends (if not early continue)
-  useEffect(() => {
-    if (timeLeft === 0 && !breakConfig.allowEarlyContinue) {
-      onContinue();
-    }
-  }, [timeLeft, breakConfig.allowEarlyContinue, onContinue]);
+  const hasTimer = breakConfig.durationMinutes !== undefined && breakConfig.durationMinutes > 0;
+  const isTimerActive = hasTimer && timeLeft !== null && timeLeft > 0;
 
   return (
     <div style={{ 
       fontFamily: 'Roboto, sans-serif', 
-      backgroundColor: 'white', 
+      backgroundColor: '#ffffff', 
       minHeight: '100vh', 
-      color: 'black',
+      color: '#000000',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
@@ -93,7 +91,7 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
         right: 0,
         zIndex: 10
       }}>
-        <div style={{ fontSize: '20px', color: 'white' }}>
+        <div style={{ fontSize: '20px', color: '#ffffff', fontFamily: 'Roboto, sans-serif' }}>
           <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
         </div>
       </div>
@@ -105,7 +103,7 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
         marginTop: '80px',
         textAlign: 'center'
       }}>
-        {/* Completed message */}
+        {/* Section Complete */}
         <div style={{ marginBottom: '32px' }}>
           <div style={{ 
             fontSize: '24px', 
@@ -121,7 +119,7 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
             color: '#666666', 
             fontFamily: 'Roboto, sans-serif'
           }}>
-            You've completed: <strong>{groupName}</strong>
+            You've completed: <strong style={{ color: '#000000' }}>{groupName}</strong>
           </div>
           <div style={{ 
             fontSize: '13px', 
@@ -133,7 +131,7 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
           </div>
         </div>
 
-        {/* Break message */}
+        {/* Break Message */}
         <div style={{ 
           padding: '24px', 
           backgroundColor: '#f5f5f5', 
@@ -159,8 +157,8 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
           </div>
         </div>
 
-        {/* Timer */}
-        {timeLeft !== null && timeLeft > 0 && (
+        {/* Timer Display */}
+        {isTimerActive && (
           <div style={{ marginBottom: '32px' }}>
             <div style={{ 
               fontSize: '48px', 
@@ -181,21 +179,20 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
           </div>
         )}
 
-        {/* Continue button */}
+        {/* Continue Button */}
         <button
           onClick={handleContinue}
           disabled={!canContinue}
           style={{
             padding: '14px 32px',
             backgroundColor: canContinue ? '#00c462' : '#cccccc',
-            color: canContinue ? 'white' : '#666666',
+            color: canContinue ? '#ffffff' : '#666666',
             border: 'none',
             borderRadius: '8px',
             cursor: canContinue ? 'pointer' : 'not-allowed',
             fontWeight: 'bold',
             fontSize: '16px',
             fontFamily: 'Roboto, sans-serif',
-            transition: 'background-color 0.2s',
             width: '100%',
             maxWidth: '200px'
           }}
@@ -203,26 +200,15 @@ export function BreakScreen({ breakConfig, groupName, groupPath, onContinue }: B
           Continue →
         </button>
 
-        {/* Early continue hint */}
-        {breakConfig.allowEarlyContinue && timeLeft !== null && timeLeft > 0 && (
-          <div style={{ 
-            marginTop: '16px', 
-            fontSize: '12px', 
-            color: '#999999',
-            fontFamily: 'Roboto, sans-serif'
-          }}>
+        {/* Hints */}
+        {breakConfig.allowEarlyContinue && isTimerActive && (
+          <div style={{ marginTop: '16px', fontSize: '12px', color: '#999999', fontFamily: 'Roboto, sans-serif' }}>
             You can continue early at any time
           </div>
         )}
 
-        {/* Auto-continue hint */}
-        {!breakConfig.allowEarlyContinue && timeLeft !== null && timeLeft > 0 && (
-          <div style={{ 
-            marginTop: '16px', 
-            fontSize: '12px', 
-            color: '#999999',
-            fontFamily: 'Roboto, sans-serif'
-          }}>
+        {!breakConfig.allowEarlyContinue && isTimerActive && (
+          <div style={{ marginTop: '16px', fontSize: '12px', color: '#999999', fontFamily: 'Roboto, sans-serif' }}>
             Exam will continue automatically when timer reaches zero
           </div>
         )}
