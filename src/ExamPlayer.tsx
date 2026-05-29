@@ -69,7 +69,7 @@ interface ExamCondition {
     timeLimit: TimeLimit;
   }[];
   passingScore?: number;
-  questionOrderMode: 'manual' | 'auto';
+  shuffleAnswers: boolean;  // ← ONLY for answer choices
 }
 
 interface Exam {
@@ -88,14 +88,23 @@ interface ExamPlayerProps {
   onComplete: () => void;
 }
 
-interface GroupWithQuestions {
-  group: GroupNode;
-  questions: FlattenedQuestion[];
-  groupPath: string;
+interface TreeNode {
+  id: string;
+  name: string;
+  type: string;
+  path: string[];
+  parentId: string | null;
+  questions: FlatQuestion[];
+  children: TreeNode[];
   timeLimit?: TimeLimit;
+  depth: number;
+  firstQuestionIndex: number;
+  lastQuestionIndex: number;
+  answeredCount: number;
+  totalQuestions: number;
 }
 
-interface FlattenedQuestion {
+interface FlatQuestion {
   id: string;
   text: string;
   type: 'MCQ' | 'WRITTEN';
@@ -103,8 +112,10 @@ interface FlattenedQuestion {
   originalQuestion: Question | LegacyQuestion;
   groupId: string;
   groupName: string;
-  groupPath: string;
-  groupType: string;
+  groupPath: string[];
+  parentId: string | null;
+  timeLimit?: TimeLimit;
+  globalIndex: number;
 }
 
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -160,11 +171,9 @@ const formatTimeDisplay = (seconds: number): string => {
 };
 
 export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
-  // Support both the legacy exam format and the newer JSON structure which wraps the exam under an "exam" key
   const examData: Exam | LegacyExam = (exam as any).exam ? (exam as any).exam : exam;
   
-  // ALL HOOKS FIRST - before any conditional returns
-  const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
+  // State
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Map<string, string | number>>(new Map());
   const [submitted, setSubmitted] = useState(false);
@@ -172,37 +181,347 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [warningThreshold] = useState(300);
   const [error, setError] = useState<string | null>(null);
-  const [showGroupSidebar, setShowGroupSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [loading, setLoading] = useState(true);
   const [shuffledOptions, setShuffledOptions] = useState<Map<string, { options: string[]; fixedLetter?: string; fixedOption: string | null }>>(new Map());
   const [groupTimeRemaining, setGroupTimeRemaining] = useState<Map<string, number>>(new Map());
 
-  // Helper functions - defined BEFORE effects that use them
   const getAnswerKey = (groupId: string, questionId: string) => `${groupId}_${questionId}`;
-  
+
+  // Build the n-ary tree and flattened questions list - NO SHUFFLING OF QUESTIONS
+  const { flatQuestions, totalQuestions, totalPoints, treeRoots, getNodeByQuestionIndex } = useMemo(() => {
+    const isLegacy = (examData as any).questions && !(examData as Exam).sections;
+    
+    if (isLegacy) {
+      const legacyExam = examData as LegacyExam;
+      const legacyQuestions: FlatQuestion[] = legacyExam.questions.map((q, idx) => ({
+        id: q.id || `q${idx}`,
+        text: q.text,
+        type: q.type === 'mc' ? 'MCQ' as const : 'WRITTEN' as const,
+        points: q.points || 1,
+        originalQuestion: q,
+        groupId: 'legacy',
+        groupName: 'Exam',
+        groupPath: ['Exam'],
+        parentId: null,
+        globalIndex: idx
+      }));
+      const totalQ = legacyQuestions.length;
+      const totalPts = legacyQuestions.reduce((sum, q) => sum + q.points, 0);
+      
+      const legacyNode: TreeNode = {
+        id: 'legacy',
+        name: 'Exam',
+        type: 'section',
+        path: ['Exam'],
+        parentId: null,
+        questions: legacyQuestions,
+        children: [],
+        depth: 0,
+        firstQuestionIndex: 0,
+        lastQuestionIndex: totalQ - 1,
+        answeredCount: 0,
+        totalQuestions: totalQ
+      };
+      
+      const getNode = () => legacyNode;
+      
+      return { 
+        flatQuestions: legacyQuestions, 
+        totalQuestions: totalQ, 
+        totalPoints: totalPts,
+        treeRoots: [legacyNode],
+        getNodeByQuestionIndex: getNode
+      };
+    }
+    
+    const examWithSections = examData as Exam;
+    if (!examWithSections.sections || examWithSections.sections.length === 0) {
+      return { flatQuestions: [], totalQuestions: 0, totalPoints: 0, treeRoots: [], getNodeByQuestionIndex: () => null };
+    }
+    
+    // Build time limit map
+    const timeLimitMap = new Map<string, TimeLimit>();
+    if (examWithSections.conditions.groupTimeLimits) {
+      for (const gtl of examWithSections.conditions.groupTimeLimits) {
+        timeLimitMap.set(gtl.groupId, gtl.timeLimit);
+      }
+    }
+    
+    const getTimeLimitForGroup = (groupId: string, groupTimeLimit?: TimeLimit): TimeLimit | undefined => {
+      if (groupTimeLimit?.enabled) return groupTimeLimit;
+      return timeLimitMap.get(groupId);
+    };
+    
+    // Recursive function to build tree and collect questions in order (DFS - PRESERVES EXACT JSON ORDER)
+    let globalQuestionIndex = 0;
+    const flatQuestionsList: FlatQuestion[] = [];
+    const nodeMap = new Map<string, TreeNode>();
+    let roots: TreeNode[] = [];
+    
+    const processGroup = (
+      group: GroupNode, 
+      parentId: string | null, 
+      path: string[], 
+      depth: number
+    ): TreeNode => {
+      const currentPath = [...path, group.name];
+      const groupId = group.id;
+      const timeLimit = getTimeLimitForGroup(groupId, group.timeLimit);
+      
+      // Collect questions from this group (preserving order)
+      const groupQuestions: FlatQuestion[] = [];
+      for (const eq of group.questions) {
+        if (eq.question) {
+          const flatQ: FlatQuestion = {
+            id: eq.id,
+            text: eq.question.text,
+            type: eq.question.type,
+            points: eq.overridePoints || eq.question.points || 1,
+            originalQuestion: eq.question,
+            groupId: groupId,
+            groupName: group.name,
+            groupPath: currentPath,
+            parentId: parentId,
+            timeLimit,
+            globalIndex: globalQuestionIndex++
+          };
+          groupQuestions.push(flatQ);
+          flatQuestionsList.push(flatQ);
+        }
+      }
+      
+      // Create node
+      const node: TreeNode = {
+        id: groupId,
+        name: group.name,
+        type: group.type,
+        path: currentPath,
+        parentId: parentId,
+        questions: groupQuestions,
+        children: [],
+        timeLimit,
+        depth,
+        firstQuestionIndex: groupQuestions.length > 0 ? groupQuestions[0].globalIndex : -1,
+        lastQuestionIndex: groupQuestions.length > 0 ? groupQuestions[groupQuestions.length - 1].globalIndex : -1,
+        answeredCount: 0,
+        totalQuestions: groupQuestions.length
+      };
+      
+      nodeMap.set(groupId, node);
+      
+      // Process children (modules, submodules, etc.) - preserving order
+      for (const childGroup of group.groups) {
+        const childNode = processGroup(childGroup, groupId, currentPath, depth + 1);
+        node.children.push(childNode);
+        // Aggregate child questions into node's range
+        if (childNode.firstQuestionIndex !== -1) {
+          if (node.firstQuestionIndex === -1 || childNode.firstQuestionIndex < node.firstQuestionIndex) {
+            node.firstQuestionIndex = childNode.firstQuestionIndex;
+          }
+          if (node.lastQuestionIndex === -1 || childNode.lastQuestionIndex > node.lastQuestionIndex) {
+            node.lastQuestionIndex = childNode.lastQuestionIndex;
+          }
+        }
+        node.totalQuestions += childNode.totalQuestions;
+      }
+      
+      return node;
+    };
+    
+    // Process each section in EXACT order of the JSON array
+    for (const section of examWithSections.sections) {
+      const rootNode = processGroup(section, null, [], 0);
+      roots.push(rootNode);
+    }
+    
+    // NO SHUFFLING OF QUESTIONS - preserve exact JSON order
+    // flatQuestionsList is already in correct DFS order
+    
+    const totalQ = flatQuestionsList.length;
+    const totalPts = flatQuestionsList.reduce((sum, q) => sum + q.points, 0);
+    
+    const getNodeByIndex = (index: number): TreeNode | null => {
+      const question = flatQuestionsList[index];
+      if (!question) return null;
+      return nodeMap.get(question.groupId) || null;
+    };
+    
+    return { 
+      flatQuestions: flatQuestionsList, 
+      totalQuestions: totalQ, 
+      totalPoints: totalPts,
+      treeRoots: roots,
+      getNodeByQuestionIndex: getNodeByIndex
+    };
+  }, [examData]);
+
+  // Get current question and its node
+  const currentQuestion = flatQuestions[currentQuestionIndex];
+  const currentNode = currentQuestion ? getNodeByQuestionIndex(currentQuestionIndex) : null;
+
+  // Shuffle MCQ options ONLY - this runs once per question and does NOT affect section order
+  useEffect(() => {
+    if (flatQuestions.length === 0) return;
+    
+    const optionsMap = new Map();
+    const shouldShuffleAnswers = (examData as Exam).conditions?.shuffleAnswers ?? true;
+    
+    for (const q of flatQuestions) {
+      if (q.type === 'MCQ') {
+        const originalQ = q.originalQuestion as Question;
+        if (originalQ.correctOptions && originalQ.correctOptions.length > 0 && originalQ.incorrectOptions) {
+          // Only shuffle if shuffleAnswers is true
+          if (shouldShuffleAnswers) {
+            const shuffled = shuffleOptionsWithFixed(
+              originalQ.correctOptions,
+              originalQ.incorrectOptions,
+              originalQ.fixedOptionIndex,
+              originalQ.fixedOptionText
+            );
+            optionsMap.set(q.id, shuffled);
+          } else {
+            // No shuffle - preserve original order
+            const allOptions = [...originalQ.correctOptions, ...originalQ.incorrectOptions];
+            optionsMap.set(q.id, { options: allOptions, fixedLetter: undefined, fixedOption: null });
+          }
+        } else if ((q.originalQuestion as LegacyQuestion).options) {
+          const legacyQ = q.originalQuestion as LegacyQuestion;
+          const allOptions = legacyQ.options || [];
+          const correctAnswerIndex = legacyQ.correctAnswer;
+          const correctOption = correctAnswerIndex !== undefined ? allOptions[correctAnswerIndex] : null;
+          const incorrectOptions = allOptions.filter((_, idx) => idx !== correctAnswerIndex);
+          
+          if (shouldShuffleAnswers) {
+            const shuffled = shuffleOptionsWithFixed(
+              correctOption ? [correctOption] : [],
+              incorrectOptions,
+              undefined,
+              undefined
+            );
+            optionsMap.set(q.id, shuffled);
+          } else {
+            optionsMap.set(q.id, { options: allOptions, fixedLetter: undefined, fixedOption: null });
+          }
+        }
+      }
+    }
+    setShuffledOptions(optionsMap);
+  }, [flatQuestions, examData]);
+
+  // Get current time limit
+  const currentTimeLimit = currentQuestion?.timeLimit || (examData as Exam).conditions?.globalTimeLimit;
+
+  // Update answered counts in tree nodes (just for display, not stored in state)
+  useEffect(() => {
+    // This effect just triggers re-render when answers change
+  }, [answers]);
+
+  // Timer effect
+  useEffect(() => {
+    if (!examStarted || submitted || timeLeft === null || timeLeft <= 0) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timer);
+          handleSubmit();
+          return 0;
+        }
+        if (currentQuestion) {
+          setGroupTimeRemaining(prevMap => new Map(prevMap).set(currentQuestion.groupId, prev - 1));
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [examStarted, submitted, timeLeft, currentQuestion]);
+
+  // Initialize time
+  useEffect(() => {
+    if (flatQuestions.length > 0 && timeLeft === null && examStarted && currentQuestion) {
+      let timeLimit = currentQuestion.timeLimit;
+      if (!timeLimit?.enabled) {
+        const examWithConditions = examData as Exam;
+        timeLimit = examWithConditions.conditions.globalTimeLimit;
+      }
+      const seconds = calculateTimeLimitInSeconds(timeLimit);
+      if (seconds !== null && seconds > 0) {
+        const savedTime = groupTimeRemaining.get(currentQuestion.groupId);
+        setTimeLeft(savedTime !== undefined ? savedTime : seconds);
+      } else {
+        setTimeLeft(null);
+      }
+    }
+  }, [flatQuestions, examStarted, timeLeft, currentQuestion]);
+
+  // Update time when question changes
+  useEffect(() => {
+    if (!examStarted || !currentQuestion) return;
+    
+    let timeLimit = currentQuestion.timeLimit;
+    if (!timeLimit?.enabled) {
+      const examWithConditions = examData as Exam;
+      timeLimit = examWithConditions.conditions.globalTimeLimit;
+    }
+    
+    const seconds = calculateTimeLimitInSeconds(timeLimit);
+    if (seconds !== null && seconds > 0) {
+      const savedTime = groupTimeRemaining.get(currentQuestion.groupId);
+      setTimeLeft(savedTime !== undefined ? savedTime : seconds);
+    } else {
+      setTimeLeft(null);
+    }
+  }, [currentQuestionIndex, examStarted]);
+
+  useEffect(() => {
+    if (timeLeft !== null && timeLeft <= 0 && !submitted && examStarted) {
+      handleSubmit();
+    }
+  }, [timeLeft, submitted, examStarted]);
+
+  useEffect(() => {
+    setLoading(false);
+  }, [flatQuestions]);
+
+  useEffect(() => {
+    if (!loading && flatQuestions.length === 0 && totalQuestions === 0) {
+      const isLegacy = (examData as any).questions && !(examData as Exam).sections;
+      if (!isLegacy) {
+        const examWithSections = examData as Exam;
+        if (!examWithSections.sections || examWithSections.sections.length === 0) {
+          setError('This exam has no sections. Please add sections to the exam first.');
+        } else {
+          setError('This exam has no questions. Please add questions to the exam first.');
+        }
+      }
+    } else {
+      setError(null);
+    }
+  }, [flatQuestions, totalQuestions, examData, loading]);
+
   const calculateScore = () => {
     let earnedPoints = 0;
     let totalPointsSum = 0;
 
-    for (const group of groupsWithQuestions) {
-      for (const q of group.questions) {
-        totalPointsSum += q.points;
-        const answer = answers.get(getAnswerKey(group.group.id, q.id));
+    for (const q of flatQuestions) {
+      totalPointsSum += q.points;
+      const answer = answers.get(getAnswerKey(q.groupId, q.id));
 
-        if (q.type === 'MCQ') {
-          const originalQ = q.originalQuestion as Question;
-          const legacyQ = q.originalQuestion as LegacyQuestion;
-          
-          if (originalQ.correctOptions) {
-            const selectedOptionText = answer as string;
-            if (originalQ.correctOptions.includes(selectedOptionText)) {
-              earnedPoints += q.points;
-            }
-          } else if (legacyQ.correctAnswer !== undefined) {
-            const selectedIndex = answer as number;
-            if (selectedIndex === legacyQ.correctAnswer) {
-              earnedPoints += q.points;
-            }
+      if (q.type === 'MCQ') {
+        const originalQ = q.originalQuestion as Question;
+        const legacyQ = q.originalQuestion as LegacyQuestion;
+        
+        if (originalQ.correctOptions) {
+          const selectedOptionText = answer as string;
+          if (originalQ.correctOptions.includes(selectedOptionText)) {
+            earnedPoints += q.points;
+          }
+        } else if (legacyQ.correctAnswer !== undefined) {
+          const selectedIndex = answer as number;
+          if (selectedIndex === legacyQ.correctAnswer) {
+            earnedPoints += q.points;
           }
         }
       }
@@ -213,11 +532,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
 
   const getAnsweredCount = () => {
     let count = 0;
-    for (const group of groupsWithQuestions) {
-      for (const q of group.questions) {
-        if (answers.has(getAnswerKey(group.group.id, q.id))) {
-          count++;
-        }
+    for (const q of flatQuestions) {
+      if (answers.has(getAnswerKey(q.groupId, q.id))) {
+        count++;
       }
     }
     return count;
@@ -226,7 +543,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const saveResult = () => {
     const { earnedPoints, totalPoints: totalPointsSum } = calculateScore();
     const pastExams = JSON.parse(localStorage.getItem('pastExams') || '[]');
-    const hasWrittenQuestions = groupsWithQuestions.some(g => g.questions.some(q => q.type === 'WRITTEN'));
+    const hasWrittenQuestions = flatQuestions.some(q => q.type === 'WRITTEN');
     const answeredCount = getAnsweredCount();
     
     pastExams.push({
@@ -240,14 +557,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       date: new Date().toISOString(),
       status: hasWrittenQuestions ? 'pending_review' : 'completed',
       answers: Array.from(answers.entries()),
-      groups: groupsWithQuestions.map(g => ({
-        name: g.group.name,
-        questions: g.questions.map(q => ({
-          text: q.text,
-          type: q.type,
-          points: q.points
-        }))
-      }))
     });
     localStorage.setItem('pastExams', JSON.stringify(pastExams));
   };
@@ -260,17 +569,13 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const handleAnswerSelect = (answer: string | number) => {
     if (!currentQuestion) return;
     const newAnswers = new Map(answers);
-    newAnswers.set(getAnswerKey(currentGroup.group.id, currentQuestion.id), answer);
+    newAnswers.set(getAnswerKey(currentQuestion.groupId, currentQuestion.id), answer);
     setAnswers(newAnswers);
   };
 
   const handleNextQuestion = () => {
-    if (!currentGroup) return;
-    if (currentQuestionIndex < currentGroup.questions.length - 1) {
+    if (currentQuestionIndex < flatQuestions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else if (currentGroupIndex < groupsWithQuestions.length - 1) {
-      setCurrentGroupIndex(currentGroupIndex + 1);
-      setCurrentQuestionIndex(0);
     } else {
       handleSubmit();
     }
@@ -279,282 +584,56 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const handlePreviousQuestion = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex(currentQuestionIndex - 1);
-    } else if (currentGroupIndex > 0) {
-      setCurrentGroupIndex(currentGroupIndex - 1);
-      setCurrentQuestionIndex(groupsWithQuestions[currentGroupIndex - 1].questions.length - 1);
     }
   };
 
-  const handleGoToGroup = (groupIndex: number) => {
-    setCurrentGroupIndex(groupIndex);
-    setCurrentQuestionIndex(0);
+  const handleGoToQuestion = (index: number) => {
+    setCurrentQuestionIndex(index);
     if (window.innerWidth < 768) {
-      setShowGroupSidebar(false);
+      setShowSidebar(false);
     }
   };
 
-  const handleGoToQuestion = (groupIndex: number, questionIndex: number) => {
-    setCurrentGroupIndex(groupIndex);
-    setCurrentQuestionIndex(questionIndex);
-    if (window.innerWidth < 768) {
-      setShowGroupSidebar(false);
-    }
+  // Recursive function to render the sidebar tree
+  const renderTreeNode = (node: TreeNode, level: number = 0): JSX.Element => {
+    const isActive = currentNode?.id === node.id;
+    const answeredCount = node.questions.filter(q => answers.has(getAnswerKey(q.groupId, q.id))).length;
+    const hasTimeLimit = node.timeLimit?.enabled && !node.timeLimit?.untimed;
+    const timeLimitDisplay = hasTimeLimit ? `(${node.timeLimit?.minutes}m)` : '';
+    
+    return (
+      <div key={node.id} style={{ marginBottom: '4px' }}>
+        <div 
+          onClick={() => node.firstQuestionIndex >= 0 && handleGoToQuestion(node.firstQuestionIndex)}
+          style={{ 
+            padding: '8px 10px', 
+            paddingLeft: `${12 + level * 16}px`,
+            backgroundColor: isActive ? '#e8f5e9' : 'transparent',
+            borderRadius: '6px',
+            cursor: node.firstQuestionIndex >= 0 ? 'pointer' : 'default',
+            borderLeft: isActive ? `3px solid #00c462` : '3px solid transparent',
+            opacity: node.firstQuestionIndex >= 0 ? 1 : 0.6
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: isActive ? 'bold' : 'normal', color: '#000000', fontSize: '13px' }}>
+              {node.name} {timeLimitDisplay}
+            </span>
+            <span style={{ fontSize: '11px', color: '#666' }}>{answeredCount}/{node.totalQuestions}</span>
+          </div>
+        </div>
+        {node.children.length > 0 && (
+          <div style={{ marginTop: '2px' }}>
+            {node.children.map(child => renderTreeNode(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
-  // Build group hierarchy and flatten questions by group - PRESERVING ORIGINAL JSON ORDER
-  const { groupsWithQuestions, totalQuestions, totalPoints } = useMemo(() => {
-    const isLegacy = (examData as any).questions && !(examData as Exam).sections;
-    
-    if (isLegacy) {
-      const legacyExam = examData as LegacyExam;
-      const legacyGroup: GroupWithQuestions = {
-        group: { id: 'legacy', name: 'Exam', type: 'section', groups: [], questions: [] },
-        questions: legacyExam.questions.map((q, idx) => ({
-          id: q.id || `q${idx}`,
-          text: q.text,
-          type: q.type === 'mc' ? 'MCQ' as const : 'WRITTEN' as const,
-          points: q.points || 1,
-          originalQuestion: q,
-          groupId: 'legacy',
-          groupName: 'Exam',
-          groupPath: 'Exam',
-          groupType: 'section'
-        })),
-        groupPath: 'Exam'
-      };
-      const totalQ = legacyGroup.questions.length;
-      const totalPts = legacyGroup.questions.reduce((sum, q) => sum + q.points, 0);
-      return { groupsWithQuestions: [legacyGroup], totalQuestions: totalQ, totalPoints: totalPts };
-    }
-    
-    const examWithSections = examData as Exam;
-    if (!examWithSections.sections || examWithSections.sections.length === 0) {
-      return { groupsWithQuestions: [], totalQuestions: 0, totalPoints: 0 };
-    }
-    
-    // Create a map of group time limits from conditions
-    const groupTimeLimitMap = new Map<string, TimeLimit>();
-    if (examWithSections.conditions.groupTimeLimits) {
-      for (const gtl of examWithSections.conditions.groupTimeLimits) {
-        groupTimeLimitMap.set(gtl.groupId, gtl.timeLimit);
-      }
-    }
-    
-    // Also check for time limits directly on groups
-    const getTimeLimitForGroup = (group: GroupNode): TimeLimit | undefined => {
-      if (group.timeLimit?.enabled) return group.timeLimit;
-      return groupTimeLimitMap.get(group.id);
-    };
-    
-    const extractGroups = (groups: GroupNode[], path: string = ''): GroupWithQuestions[] => {
-      let result: GroupWithQuestions[] = [];
-      for (let i = 0; i < groups.length; i++) {
-        const group = groups[i];
-        const currentPath = path ? `${path} > ${group.name}` : group.name;
-        const groupQuestions: FlattenedQuestion[] = [];
-        
-        for (let qIdx = 0; qIdx < (group.questions || []).length; qIdx++) {
-          const eq = (group.questions || [])[qIdx];
-          if (eq.question) {
-            groupQuestions.push({
-              id: eq.id,
-              text: eq.question.text,
-              type: eq.question.type,
-              points: eq.overridePoints || eq.question.points || 1,
-              originalQuestion: eq.question,
-              groupId: group.id,
-              groupName: group.name,
-              groupPath: currentPath,
-              groupType: group.type
-            });
-          }
-        }
-        
-        const timeLimit = getTimeLimitForGroup(group);
-        
-        if (groupQuestions.length > 0) {
-          result.push({
-            group,
-            questions: groupQuestions,
-            groupPath: currentPath,
-            timeLimit
-          });
-        }
-        
-        if (group.groups && group.groups.length > 0) {
-          result = result.concat(extractGroups(group.groups, currentPath));
-        }
-      }
-      return result;
-    };
-    
-    let allGroups = extractGroups(examWithSections.sections);
-    
-    // Only shuffle if auto mode is enabled
-    if (examWithSections.conditions?.questionOrderMode === 'auto') {
-      allGroups = shuffleArray(allGroups);
-    }
-    
-    const totalQ = allGroups.reduce((sum, g) => sum + g.questions.length, 0);
-    const totalPts = allGroups.reduce((sum, g) => sum + g.questions.reduce((qs, q) => qs + q.points, 0), 0);
-    
-    return { groupsWithQuestions: allGroups, totalQuestions: totalQ, totalPoints: totalPts };
-  }, [examData]);
-
-  // Get current group and question AFTER useMemo but BEFORE effects that use them
-  const currentGroup = groupsWithQuestions[currentGroupIndex];
-  const currentQuestion = currentGroup?.questions[currentQuestionIndex];
-  const selectedAnswer = currentQuestion ? answers.get(getAnswerKey(currentGroup.group.id, currentQuestion.id)) : null;
-
-  // Timer effect
-  useEffect(() => {
-    if (!examStarted || submitted || timeLeft === null || timeLeft <= 0) return;
-
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(timer);
-          handleSubmit();
-          return 0;
-        }
-        // Save current time for this group
-        if (currentGroup) {
-          setGroupTimeRemaining(prevMap => new Map(prevMap).set(currentGroup.group.id, prev - 1));
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [examStarted, submitted, timeLeft, currentGroup]);
-
-  // Initialize time for the first group
-  useEffect(() => {
-    if (groupsWithQuestions.length > 0 && timeLeft === null && examStarted && currentGroup) {
-      let groupTimeLimit = currentGroup.timeLimit;
-      
-      // If no group time limit, check global time limit
-      if (!groupTimeLimit?.enabled) {
-        const examWithConditions = examData as Exam;
-        groupTimeLimit = examWithConditions.conditions.globalTimeLimit;
-      }
-      
-      const seconds = calculateTimeLimitInSeconds(groupTimeLimit);
-      if (seconds !== null && seconds > 0) {
-        // Check if we have saved time for this group
-        const savedTime = groupTimeRemaining.get(currentGroup.group.id);
-        setTimeLeft(savedTime !== undefined ? savedTime : seconds);
-      } else {
-        setTimeLeft(null);
-      }
-    }
-  }, [groupsWithQuestions, examStarted, timeLeft, currentGroup]);
-
-  // Update time limit when switching groups
-  useEffect(() => {
-    if (!examStarted || !currentGroup) return;
-    
-    let groupTimeLimit = currentGroup.timeLimit;
-    if (!groupTimeLimit?.enabled) {
-      const examWithConditions = examData as Exam;
-      groupTimeLimit = examWithConditions.conditions.globalTimeLimit;
-    }
-    
-    const seconds = calculateTimeLimitInSeconds(groupTimeLimit);
-    if (seconds !== null && seconds > 0) {
-      // Check if we have saved time for this group
-      const savedTime = groupTimeRemaining.get(currentGroup.group.id);
-      setTimeLeft(savedTime !== undefined ? savedTime : seconds);
-    } else {
-      setTimeLeft(null);
-    }
-  }, [currentGroupIndex, examStarted, groupsWithQuestions]);
-
-  useEffect(() => {
-    if (timeLeft !== null && timeLeft <= 0 && !submitted && examStarted) {
-      handleSubmit();
-    }
-  }, [timeLeft, submitted, examStarted]);
-
-  // Pre-shuffle options for MCQ questions
-  useEffect(() => {
-    if (groupsWithQuestions.length === 0) return;
-    
-    const optionsMap = new Map();
-    for (const group of groupsWithQuestions) {
-      for (const q of group.questions) {
-        if (q.type === 'MCQ') {
-          const originalQ = q.originalQuestion as Question;
-          if (originalQ.correctOptions && originalQ.correctOptions.length > 0 && originalQ.incorrectOptions) {
-            const shuffled = shuffleOptionsWithFixed(
-              originalQ.correctOptions,
-              originalQ.incorrectOptions,
-              originalQ.fixedOptionIndex,
-              originalQ.fixedOptionText
-            );
-            optionsMap.set(q.id, shuffled);
-          } else if ((q.originalQuestion as LegacyQuestion).options) {
-            const legacyQ = q.originalQuestion as LegacyQuestion;
-            const allOptions = legacyQ.options || [];
-            const correctAnswerIndex = legacyQ.correctAnswer;
-            const correctOption = correctAnswerIndex !== undefined ? allOptions[correctAnswerIndex] : null;
-            const incorrectOptions = allOptions.filter((_, idx) => idx !== correctAnswerIndex);
-            const shuffled = shuffleOptionsWithFixed(
-              correctOption ? [correctOption] : [],
-              incorrectOptions,
-              undefined,
-              undefined
-            );
-            optionsMap.set(q.id, shuffled);
-          }
-        }
-      }
-    }
-    setShuffledOptions(optionsMap);
-  }, [groupsWithQuestions]);
-
-  // Set loading to false once groups are processed
-  useEffect(() => {
-    setLoading(false);
-  }, [groupsWithQuestions]);
-
-  // Set error if no questions
-  useEffect(() => {
-    if (!loading && groupsWithQuestions.length === 0 && totalQuestions === 0) {
-      const isLegacy = (examData as any).questions && !(examData as Exam).sections;
-      if (!isLegacy) {
-        const examWithSections = examData as Exam;
-        if (!examWithSections.sections || examWithSections.sections.length === 0) {
-          setError('This exam has no sections. Please add sections to the exam first.');
-        } else {
-          setError('This exam has no questions. Please add questions to the exam first.');
-        }
-      }
-    } else {
-      setError(null);
-    }
-  }, [groupsWithQuestions, totalQuestions, examData, loading]);
-
-  // Get section label from path
-  const currentSectionLabel = useMemo(() => {
-    if (!currentGroup) return '';
-    const pathParts = currentGroup.groupPath.split(' > ');
-    if (pathParts.length > 1) {
-      const sameSectionGroups = groupsWithQuestions.filter(g => {
-        const parts = g.groupPath.split(' > ');
-        return parts[0] === pathParts[0] && parts.length > 1;
-      });
-      const moduleNumber = sameSectionGroups.findIndex(g => g.group.id === currentGroup.group.id) + 1;
-      const sectionNumber = groupsWithQuestions.filter(g => {
-        const parts = g.groupPath.split(' > ');
-        return parts.length === 1;
-      }).findIndex(g => g.groupPath === pathParts[0]) + 1;
-      return `Section ${sectionNumber}, Module ${moduleNumber}`;
-    }
-    const sectionNumber = groupsWithQuestions.findIndex(g => g.groupPath === currentGroup.groupPath) + 1;
-    return `Section ${sectionNumber}`;
-  }, [currentGroup, groupsWithQuestions]);
-
+  const currentPathDisplay = currentQuestion?.groupPath.join(' > ') || '';
+  const selectedAnswer = currentQuestion ? answers.get(getAnswerKey(currentQuestion.groupId, currentQuestion.id)) : null;
+  
   const minutes = timeLeft !== null ? Math.floor(timeLeft / 60) : 0;
   const seconds = timeLeft !== null ? timeLeft % 60 : 0;
   const isWarning = timeLeft !== null && timeLeft <= warningThreshold;
@@ -616,6 +695,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     const globalTimeDisplay = globalTimeLimit?.enabled && !globalTimeLimit?.untimed 
       ? `${globalTimeLimit.minutes} minutes` 
       : (globalTimeLimit?.untimed ? 'Untimed' : 'No limit');
+    const shuffleAnswers = (examData as Exam).conditions?.shuffleAnswers ?? true;
     
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
@@ -634,9 +714,10 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
               <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '16px', color: '#666666' }}>{examDescription}</p>
             )}
             <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '8px', color: '#000000' }}><strong>Format:</strong> {groupsWithQuestions.length} sections, {totalQuestions} questions, {totalPoints} points total</p>
+              <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '8px', color: '#000000' }}><strong>Format:</strong> {totalQuestions} questions, {totalPoints} points total</p>
               <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '8px', color: '#000000' }}><strong>Global Time Limit:</strong> {globalTimeDisplay}</p>
               <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '8px', color: '#000000' }}><strong>Security Level:</strong> {securityLevel}</p>
+              <p style={{ fontFamily: 'Roboto, sans-serif', marginBottom: '8px', color: '#000000' }}><strong>Shuffle Answers:</strong> {shuffleAnswers ? 'Yes' : 'No'}</p>
               {passingScore && (
                 <p style={{ fontFamily: 'Roboto, sans-serif', color: '#000000' }}><strong>Passing Score:</strong> {passingScore}%</p>
               )}
@@ -665,7 +746,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
 
   if (submitted) {
     const { earnedPoints, totalPoints: totalPointsSum } = calculateScore();
-    const hasWrittenQuestions = groupsWithQuestions.some(g => g.questions.some(q => q.type === 'WRITTEN'));
+    const hasWrittenQuestions = flatQuestions.some(q => q.type === 'WRITTEN');
     const percentage = totalPointsSum > 0 ? Math.round((earnedPoints / totalPointsSum) * 100) : 0;
     const passingScore = (examData as Exam).conditions?.passingScore;
     const passed = passingScore ? percentage >= passingScore : undefined;
@@ -743,7 +824,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     );
   }
 
-  if (groupsWithQuestions.length === 0 || !currentGroup) {
+  if (flatQuestions.length === 0 || !currentQuestion) {
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: 'white', minHeight: '100vh', color: 'black' }}>
         <div style={{ backgroundColor: '#00c462', padding: '12px 24px' }}>
@@ -780,84 +861,54 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       </div>
 
       <div style={{ display: 'flex', minHeight: 'calc(100vh - 60px)' }}>
-        {/* Sidebar */}
+        {/* Sidebar - N-ary Tree */}
         <div style={{ 
-          width: showGroupSidebar ? '280px' : '0',
-          overflow: 'hidden',
+          width: showSidebar ? '300px' : '0',
+          overflow: 'auto',
           transition: 'width 0.2s',
-          borderRight: showGroupSidebar ? '1px solid #e0e0e0' : 'none',
+          borderRight: showSidebar ? '1px solid #e0e0e0' : 'none',
           backgroundColor: '#fafafa'
         }}>
-          {showGroupSidebar && (
-            <div style={{ padding: '20px', height: '100%', overflowY: 'auto' }}>
+          {showSidebar && (
+            <div style={{ padding: '16px', height: '100%', overflowY: 'auto' }}>
               <button 
-                onClick={() => setShowGroupSidebar(false)}
+                onClick={() => setShowSidebar(false)}
                 style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#666' }}
               >
                 ×
               </button>
-              <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '16px', color: '#000000' }}>Sections</h3>
-              {groupsWithQuestions.map((group, gIdx) => {
-                const groupAnswered = group.questions.filter(q => answers.has(getAnswerKey(group.group.id, q.id))).length;
-                const isActive = gIdx === currentGroupIndex;
-                const pathParts = group.groupPath.split(' > ');
-                const isModule = pathParts.length > 1;
-                const indent = isModule ? '20px' : '0';
-                const displayName = isModule ? `  ${group.group.name}` : group.group.name;
-                const hasTimeLimit = group.timeLimit?.enabled && !group.timeLimit?.untimed;
-                const timeLimitDisplay = hasTimeLimit ? `(${group.timeLimit?.minutes}m)` : '';
-                
-                return (
-                  <div key={group.group.id} style={{ marginBottom: '8px', marginLeft: indent }}>
-                    <div 
-                      onClick={() => handleGoToGroup(gIdx)}
-                      style={{ 
-                        padding: '8px 10px', 
-                        backgroundColor: isActive ? '#e8f5e9' : 'transparent',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        borderLeft: isActive ? `3px solid #00c462` : '3px solid transparent'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: isActive ? 'bold' : 'normal', color: '#000000', fontSize: '13px' }}>
-                          {displayName} {timeLimitDisplay}
-                        </span>
-                        <span style={{ fontSize: '11px', color: '#666' }}>{groupAnswered}/{group.questions.length}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '16px', color: '#000000' }}>Exam Structure</h3>
+              {treeRoots.map(root => renderTreeNode(root, 0))}
             </div>
           )}
         </div>
 
         {/* Question content */}
-        <div style={{ flex: 1, padding: '40px 24px', maxWidth: showGroupSidebar ? 'calc(100% - 280px)' : '100%', margin: '0 auto' }}>
-          {!showGroupSidebar && (
+        <div style={{ flex: 1, padding: '40px 24px', maxWidth: showSidebar ? 'calc(100% - 300px)' : '100%', margin: '0 auto' }}>
+          {!showSidebar && (
             <button 
-              onClick={() => setShowGroupSidebar(true)}
+              onClick={() => setShowSidebar(true)}
               style={{ marginBottom: '16px', padding: '6px 12px', backgroundColor: '#00c462', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
             >
-              ☰ Show Sections
+              ☰ Show Structure
             </button>
           )}
           
+          {/* Breadcrumb */}
           <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666666' }}>
-            {currentGroup.groupPath}
+            {currentPathDisplay}
           </div>
           
           <div style={{ marginBottom: '32px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <span style={{ fontSize: '12px', color: '#666666' }}>
-                Question {currentQuestionIndex + 1} of {currentGroup.questions.length} • {currentQuestion?.points} {currentQuestion?.points === 1 ? 'point' : 'points'}
+                Question {currentQuestionIndex + 1} of {totalQuestions} • {currentQuestion?.points} {currentQuestion?.points === 1 ? 'point' : 'points'}
               </span>
               <span style={{ fontSize: '12px', color: '#666666' }}>
-                {currentSectionLabel}
+                {currentQuestion?.groupName}
               </span>
             </div>
-            <h2 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000', fontFamily: 'Roboto' }}>{currentQuestion?.text}</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000', fontFamily: 'Roboto' }}>{currentQuestion?.text}</h2>
 
             {currentQuestion?.type === 'MCQ' && currentShuffled && options.length > 0 && (
               <div>
@@ -951,14 +1002,14 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px' }}>
             <button
               onClick={handlePreviousQuestion}
-              disabled={currentGroupIndex === 0 && currentQuestionIndex === 0}
+              disabled={currentQuestionIndex === 0}
               style={{
                 padding: '10px 20px',
-                backgroundColor: (currentGroupIndex === 0 && currentQuestionIndex === 0) ? '#ccc' : '#00c462',
+                backgroundColor: currentQuestionIndex === 0 ? '#ccc' : '#00c462',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: (currentGroupIndex === 0 && currentQuestionIndex === 0) ? 'not-allowed' : 'pointer',
+                cursor: currentQuestionIndex === 0 ? 'not-allowed' : 'pointer',
                 fontWeight: 'bold',
                 fontSize: '14px'
               }}
@@ -978,7 +1029,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
                 fontSize: '14px'
               }}
             >
-              {(currentGroupIndex === groupsWithQuestions.length - 1 && currentQuestionIndex === currentGroup.questions.length - 1) ? 'Submit' : 'Next →'}
+              {currentQuestionIndex < totalQuestions - 1 ? 'Next →' : 'Submit'}
             </button>
           </div>
         </div>
