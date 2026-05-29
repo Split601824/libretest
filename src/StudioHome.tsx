@@ -42,6 +42,13 @@ interface TimeLimit {
   seconds: number;
 }
 
+interface BreakConfig {
+  enabled: boolean;
+  durationMinutes?: number;
+  message: string;
+  allowEarlyContinue: boolean;
+}
+
 interface GroupTimeLimit {
   groupId: string;
   groupName: string;
@@ -56,6 +63,7 @@ interface GroupNode {
   groups: GroupNode[];
   questions: ExamQuestion[];
   timeLimit?: TimeLimit;
+  breakAfter?: BreakConfig;
 }
 
 interface ExamCondition {
@@ -202,6 +210,12 @@ const t = (key: string, lang: 'en' | 'es'): string => {
     'security_secure': { en: 'Internet access is disabled. Web browsers prohibited.', es: 'El acceso a Internet está deshabilitado. Navegadores web prohibidos.' },
     'security_very_secure': { en: 'Internet + background services disabled. At Ring 1.', es: 'Internet + servicios en segundo plano deshabilitados. En Ring 1.' },
     'security_lockdown': { en: 'Kernel-level lockdown. Internet access is disabled. At Ring 0.', es: 'Bloqueo a nivel de kernel. Acceso a Internet deshabilitado. En Ring 0.' },
+    'breaks': { en: 'Breaks', es: 'Descansos' },
+    'enable_break': { en: 'Enable break after this group', es: 'Habilitar descanso después de este grupo' },
+    'break_duration': { en: 'Duration', es: 'Duración' },
+    'break_message': { en: 'Break message', es: 'Mensaje de descanso' },
+    'allow_early_continue': { en: 'Allow early continue', es: 'Permitir continuación temprana' },
+    'minutes_abbr': { en: 'minutes', es: 'minutos' },
   };
   
   return translations[key]?.[lang] || key;
@@ -891,7 +905,7 @@ export function StudioHome() {
   const handleExportExam = () => {
     if (!selectedExam) return;
     const exportData = {
-      version: '0.3.6',
+      version: '0.3.7',
       format: 'libretest-exam',
       exam: {
         id: selectedExam.id,
@@ -970,7 +984,6 @@ export function StudioHome() {
   const handleUpdateGroupTimeLimit = (groupId: string, timeLimit: TimeLimit) => {
     if (!editingExam) return;
     
-    // Update the group's timeLimit property
     const updateGroupTimeLimit = (groups: GroupNode[]): GroupNode[] => {
       return groups.map(group => {
         if (group.id === groupId) {
@@ -983,7 +996,6 @@ export function StudioHome() {
       });
     };
     
-    // Also update the conditions.groupTimeLimits for easy access
     const groupPath = findGroupPath(editingExam.sections, groupId);
     const group = findGroupById(editingExam.sections, groupId);
     const newGroupTimeLimits = [...editingExam.conditions.groupTimeLimits];
@@ -1013,6 +1025,25 @@ export function StudioHome() {
         groupTimeLimits: newGroupTimeLimits
       },
       sections: updateGroupTimeLimit(editingExam.sections)
+    });
+  };
+
+  const handleUpdateGroupBreak = (groupId: string, breakConfig: BreakConfig | undefined) => {
+    if (!editingExam) return;
+    const updateBreak = (groups: GroupNode[]): GroupNode[] => {
+      return groups.map(group => {
+        if (group.id === groupId) {
+          return { ...group, breakAfter: breakConfig };
+        }
+        if (group.groups.length > 0) {
+          return { ...group, groups: updateBreak(group.groups) };
+        }
+        return group;
+      });
+    };
+    setEditingExam({
+      ...editingExam,
+      sections: updateBreak(editingExam.sections)
     });
   };
 
@@ -1118,7 +1149,6 @@ export function StudioHome() {
           </div>
         )}
         
-        {/* Recursively render child groups */}
         {group.groups.length > 0 && (
           <div style={{ marginTop: '12px', marginLeft: '24px' }}>
             {group.groups.map(childGroup => renderTimeLimitEditor(childGroup, `${path} > ${childGroup.name}`, level + 1))}
@@ -1139,6 +1169,9 @@ export function StudioHome() {
       const timeLimit = getGroupTimeLimit(group.id);
       const hasTimeLimit = timeLimit?.enabled === true;
       const timeLimitDisplay = hasTimeLimit ? (timeLimit?.untimed ? '∞' : formatTimeLimitDisplay(timeLimit!)) : null;
+      
+      const hasBreak = group.breakAfter?.enabled === true;
+      const breakDisplay = hasBreak ? `☕ ${group.breakAfter?.durationMinutes ? `${group.breakAfter.durationMinutes}m` : '∞'}` : null;
       
       return (
         <div key={group.id} style={{ marginBottom: '16px', marginLeft: level * 24 }}>
@@ -1187,6 +1220,12 @@ export function StudioHome() {
               {hasTimeLimit && (
                 <span style={{ fontSize: '10px', backgroundColor: '#e8f5e9', padding: '2px 6px', borderRadius: '4px', color: accentColor, fontFamily: 'Roboto, sans-serif' }}>
                   ⏱️ {timeLimitDisplay}
+                </span>
+              )}
+              
+              {hasBreak && (
+                <span style={{ fontSize: '10px', backgroundColor: '#fff3e0', padding: '2px 6px', borderRadius: '4px', color: '#ff9800', fontFamily: 'Roboto, sans-serif' }}>
+                  {breakDisplay}
                 </span>
               )}
               
@@ -1265,6 +1304,24 @@ export function StudioHome() {
         </div>
       );
     });
+  };
+
+  // Helper to collect all groups that have questions (for break configuration)
+  const collectBreakableGroups = (groups: GroupNode[], path: string = ''): { group: GroupNode; path: string }[] => {
+    let result: { group: GroupNode; path: string }[] = [];
+    for (const group of groups) {
+      const currentPath = path ? `${path} > ${group.name}` : group.name;
+      const hasQuestions = group.questions.length > 0;
+      const hasChildGroupsWithQuestions = group.groups.some(g => g.questions.length > 0);
+      
+      if (hasQuestions || hasChildGroupsWithQuestions) {
+        result.push({ group, path: currentPath });
+      }
+      if (group.groups.length > 0) {
+        result = result.concat(collectBreakableGroups(group.groups, currentPath));
+      }
+    }
+    return result;
   };
 
   return (
@@ -2023,6 +2080,115 @@ export function StudioHome() {
                           )}
                         </div>
 
+                        {/* Breaks Section - NEW */}
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '14px' }}>{t('breaks', lang)}</label>
+                          <div style={{ fontSize: '13px', color: '#666666', marginBottom: '16px', fontFamily: 'Roboto, sans-serif' }}>
+                            Configure breaks that appear after specific sections or modules.
+                          </div>
+                          {(() => {
+                            const breakableGroups = collectBreakableGroups(editingExam?.sections || []);
+                            if (breakableGroups.length === 0) {
+                              return <p style={{ color: '#999999', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>No sections or modules with questions. Add questions to configure breaks.</p>;
+                            }
+                            return breakableGroups.map(({ group, path }) => {
+                              const breakConfig = group.breakAfter || { enabled: false, durationMinutes: 5, message: 'Take a break.', allowEarlyContinue: true };
+                              const isEnabled = breakConfig.enabled;
+                              
+                              return (
+                                <div key={group.id} style={{ padding: '12px', border: '1px solid #e0e0e0', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '12px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div>
+                                      <span style={{ fontWeight: 'bold', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{group.name}</span>
+                                      <span style={{ fontSize: '11px', color: '#999999', fontFamily: 'Roboto, sans-serif', marginLeft: '12px' }}>{path}</span>
+                                    </div>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isEnabled}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            handleUpdateGroupBreak(group.id, { enabled: true, durationMinutes: 5, message: 'Take a break.', allowEarlyContinue: true });
+                                          } else {
+                                            handleUpdateGroupBreak(group.id, { enabled: false, durationMinutes: 5, message: 'Take a break.', allowEarlyContinue: true });
+                                          }
+                                        }}
+                                      />
+                                      {t('enable_break', lang)}
+                                    </label>
+                                  </div>
+                                  
+                                  {isEnabled && (
+                                    <div style={{ marginLeft: '24px', marginTop: '12px' }}>
+                                      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '12px', alignItems: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <input
+                                            type="checkbox"
+                                            id={`untimed_${group.id}`}
+                                            checked={breakConfig.durationMinutes === undefined}
+                                            onChange={(e) => {
+                                              const newBreakConfig = {
+                                                ...breakConfig,
+                                                durationMinutes: e.target.checked ? undefined : 5
+                                              };
+                                              handleUpdateGroupBreak(group.id, newBreakConfig);
+                                            }}
+                                          />
+                                          <label htmlFor={`untimed_${group.id}`} style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('untimed', lang)}</label>
+                                        </div>
+                                        
+                                        {breakConfig.durationMinutes !== undefined && (
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('break_duration', lang)}</span>
+                                            <input
+                                              type="number"
+                                              value={breakConfig.durationMinutes}
+                                              onChange={(e) => {
+                                                const newBreakConfig = { ...breakConfig, durationMinutes: parseInt(e.target.value) || 0 };
+                                                handleUpdateGroupBreak(group.id, newBreakConfig);
+                                              }}
+                                              style={{ width: '80px', padding: '6px 8px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                              min="1"
+                                            />
+                                            <span style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('minutes_abbr', lang)}</span>
+                                          </div>
+                                        )}
+                                        
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <input
+                                            type="checkbox"
+                                            id={`early_${group.id}`}
+                                            checked={breakConfig.allowEarlyContinue}
+                                            onChange={(e) => {
+                                              const newBreakConfig = { ...breakConfig, allowEarlyContinue: e.target.checked };
+                                              handleUpdateGroupBreak(group.id, newBreakConfig);
+                                            }}
+                                          />
+                                          <label htmlFor={`early_${group.id}`} style={{ fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('allow_early_continue', lang)}</label>
+                                        </div>
+                                      </div>
+                                      
+                                      <div>
+                                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: '#000000', fontFamily: 'Roboto, sans-serif' }}>{t('break_message', lang)}</label>
+                                        <input
+                                          type="text"
+                                          value={breakConfig.message}
+                                          onChange={(e) => {
+                                            const newBreakConfig = { ...breakConfig, message: e.target.value };
+                                            handleUpdateGroupBreak(group.id, newBreakConfig);
+                                          }}
+                                          style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontFamily: 'Roboto, sans-serif', color: '#000000' }}
+                                          placeholder="e.g., Stretch break. You may stand up and move around."
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+
                         {/* Passing Score */}
                         <div>
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('passing_score', lang)}</label>
@@ -2084,7 +2250,7 @@ export function StudioHome() {
                           <label style={{ display: 'block', marginBottom: '6px', fontWeight: 500, color: '#000000', fontFamily: 'Roboto, sans-serif', fontSize: '13px' }}>{t('preview', lang)}</label>
                           <pre style={{ backgroundColor: '#f5f5f5', padding: '12px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', overflow: 'auto', maxHeight: '300px', color: '#000000' }}>
                             {JSON.stringify({
-                              version: '0.3.6',
+                              version: '0.3.7',
                               format: 'libretest-exam',
                               exam: {
                                 id: editingExam.id,

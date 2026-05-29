@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { BreakScreen } from './BreakScreen';
 
 interface WrittenResponseLimits {
   mode: 'characters' | 'words' | 'both';
@@ -50,6 +51,13 @@ interface TimeLimit {
   seconds: number;
 }
 
+interface BreakConfig {
+  enabled: boolean;
+  durationMinutes?: number;
+  message: string;
+  allowEarlyContinue: boolean;
+}
+
 interface GroupNode {
   id: string;
   name: string;
@@ -57,6 +65,7 @@ interface GroupNode {
   groups: GroupNode[];
   questions: ExamQuestion[];
   timeLimit?: TimeLimit;
+  breakAfter?: BreakConfig;
 }
 
 interface ExamCondition {
@@ -69,7 +78,7 @@ interface ExamCondition {
     timeLimit: TimeLimit;
   }[];
   passingScore?: number;
-  shuffleAnswers: boolean;  // ← ONLY for answer choices
+  shuffleAnswers: boolean;
 }
 
 interface Exam {
@@ -97,6 +106,7 @@ interface TreeNode {
   questions: FlatQuestion[];
   children: TreeNode[];
   timeLimit?: TimeLimit;
+  breakAfter?: BreakConfig;
   depth: number;
   firstQuestionIndex: number;
   lastQuestionIndex: number;
@@ -185,11 +195,18 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [loading, setLoading] = useState(true);
   const [shuffledOptions, setShuffledOptions] = useState<Map<string, { options: string[]; fixedLetter?: string; fixedOption: string | null }>>(new Map());
   const [groupTimeRemaining, setGroupTimeRemaining] = useState<Map<string, number>>(new Map());
+  
+  // Break state
+  const [showBreakScreen, setShowBreakScreen] = useState(false);
+  const [pendingBreakConfig, setPendingBreakConfig] = useState<BreakConfig | null>(null);
+  const [pendingGroupName, setPendingGroupName] = useState<string>('');
+  const [pendingGroupPath, setPendingGroupPath] = useState<string>('');
+  const [pendingNextGroupIndex, setPendingNextGroupIndex] = useState<number | null>(null);
 
   const getAnswerKey = (groupId: string, questionId: string) => `${groupId}_${questionId}`;
 
   // Build the n-ary tree and flattened questions list - NO SHUFFLING OF QUESTIONS
-  const { flatQuestions, totalQuestions, totalPoints, treeRoots, getNodeByQuestionIndex } = useMemo(() => {
+  const { flatQuestions, totalQuestions, totalPoints, treeRoots, getNodeByQuestionIndex, getGroupByQuestionIndex } = useMemo(() => {
     const isLegacy = (examData as any).questions && !(examData as Exam).sections;
     
     if (isLegacy) {
@@ -225,19 +242,21 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       };
       
       const getNode = () => legacyNode;
+      const getGroup = () => ({ name: 'Exam', path: 'Exam', breakAfter: undefined });
       
       return { 
         flatQuestions: legacyQuestions, 
         totalQuestions: totalQ, 
         totalPoints: totalPts,
         treeRoots: [legacyNode],
-        getNodeByQuestionIndex: getNode
+        getNodeByQuestionIndex: getNode,
+        getGroupByQuestionIndex: getGroup
       };
     }
     
     const examWithSections = examData as Exam;
     if (!examWithSections.sections || examWithSections.sections.length === 0) {
-      return { flatQuestions: [], totalQuestions: 0, totalPoints: 0, treeRoots: [], getNodeByQuestionIndex: () => null };
+      return { flatQuestions: [], totalQuestions: 0, totalPoints: 0, treeRoots: [], getNodeByQuestionIndex: () => null, getGroupByQuestionIndex: () => null };
     }
     
     // Build time limit map
@@ -252,6 +271,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       if (groupTimeLimit?.enabled) return groupTimeLimit;
       return timeLimitMap.get(groupId);
     };
+    
+    // Store break configs for groups
+    const breakConfigMap = new Map<string, BreakConfig>();
     
     // Recursive function to build tree and collect questions in order (DFS - PRESERVES EXACT JSON ORDER)
     let globalQuestionIndex = 0;
@@ -268,6 +290,11 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       const currentPath = [...path, group.name];
       const groupId = group.id;
       const timeLimit = getTimeLimitForGroup(groupId, group.timeLimit);
+      
+      // Store break config
+      if (group.breakAfter?.enabled) {
+        breakConfigMap.set(groupId, group.breakAfter);
+      }
       
       // Collect questions from this group (preserving order)
       const groupQuestions: FlatQuestion[] = [];
@@ -301,6 +328,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         questions: groupQuestions,
         children: [],
         timeLimit,
+        breakAfter: group.breakAfter,
         depth,
         firstQuestionIndex: groupQuestions.length > 0 ? groupQuestions[0].globalIndex : -1,
         lastQuestionIndex: groupQuestions.length > 0 ? groupQuestions[groupQuestions.length - 1].globalIndex : -1,
@@ -335,9 +363,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       roots.push(rootNode);
     }
     
-    // NO SHUFFLING OF QUESTIONS - preserve exact JSON order
-    // flatQuestionsList is already in correct DFS order
-    
     const totalQ = flatQuestionsList.length;
     const totalPts = flatQuestionsList.reduce((sum, q) => sum + q.points, 0);
     
@@ -347,20 +372,33 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       return nodeMap.get(question.groupId) || null;
     };
     
+    const getGroupByIndex = (index: number): { name: string; path: string; breakAfter?: BreakConfig } | null => {
+      const question = flatQuestionsList[index];
+      if (!question) return null;
+      const node = nodeMap.get(question.groupId);
+      return {
+        name: node?.name || question.groupName,
+        path: question.groupPath.join(' > '),
+        breakAfter: node?.breakAfter
+      };
+    };
+    
     return { 
       flatQuestions: flatQuestionsList, 
       totalQuestions: totalQ, 
       totalPoints: totalPts,
       treeRoots: roots,
-      getNodeByQuestionIndex: getNodeByIndex
+      getNodeByQuestionIndex: getNodeByIndex,
+      getGroupByQuestionIndex: getGroupByIndex
     };
   }, [examData]);
 
   // Get current question and its node
   const currentQuestion = flatQuestions[currentQuestionIndex];
   const currentNode = currentQuestion ? getNodeByQuestionIndex(currentQuestionIndex) : null;
+  const currentGroupInfo = currentQuestion ? getGroupByQuestionIndex(currentQuestionIndex) : null;
 
-  // Shuffle MCQ options ONLY - this runs once per question and does NOT affect section order
+  // Shuffle MCQ options ONLY
   useEffect(() => {
     if (flatQuestions.length === 0) return;
     
@@ -371,7 +409,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       if (q.type === 'MCQ') {
         const originalQ = q.originalQuestion as Question;
         if (originalQ.correctOptions && originalQ.correctOptions.length > 0 && originalQ.incorrectOptions) {
-          // Only shuffle if shuffleAnswers is true
           if (shouldShuffleAnswers) {
             const shuffled = shuffleOptionsWithFixed(
               originalQ.correctOptions,
@@ -381,7 +418,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             );
             optionsMap.set(q.id, shuffled);
           } else {
-            // No shuffle - preserve original order
             const allOptions = [...originalQ.correctOptions, ...originalQ.incorrectOptions];
             optionsMap.set(q.id, { options: allOptions, fixedLetter: undefined, fixedOption: null });
           }
@@ -411,11 +447,6 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
 
   // Get current time limit
   const currentTimeLimit = currentQuestion?.timeLimit || (examData as Exam).conditions?.globalTimeLimit;
-
-  // Update answered counts in tree nodes (just for display, not stored in state)
-  useEffect(() => {
-    // This effect just triggers re-render when answers change
-  }, [answers]);
 
   // Timer effect
   useEffect(() => {
@@ -574,11 +605,39 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   };
 
   const handleNextQuestion = () => {
-    if (currentQuestionIndex < flatQuestions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    // Check if we're moving from the last question of a group
+    const nextIndex = currentQuestionIndex + 1;
+    
+    // Check if this is the last question of the current group
+    if (currentNode && nextIndex > currentNode.lastQuestionIndex && currentNode.breakAfter?.enabled) {
+      // Show break screen before moving to next group
+      setPendingBreakConfig(currentNode.breakAfter);
+      setPendingGroupName(currentNode.name);
+      setPendingGroupPath(currentNode.path.join(' > '));
+      setPendingNextGroupIndex(nextIndex);
+      setShowBreakScreen(true);
+      return;
+    }
+    
+    // Normal question navigation
+    if (nextIndex < flatQuestions.length) {
+      setCurrentQuestionIndex(nextIndex);
     } else {
       handleSubmit();
     }
+  };
+
+  const handleBreakComplete = () => {
+    setShowBreakScreen(false);
+    if (pendingNextGroupIndex !== null && pendingNextGroupIndex < flatQuestions.length) {
+      setCurrentQuestionIndex(pendingNextGroupIndex);
+    } else if (pendingNextGroupIndex !== null && pendingNextGroupIndex >= flatQuestions.length) {
+      handleSubmit();
+    }
+    setPendingBreakConfig(null);
+    setPendingGroupName('');
+    setPendingGroupPath('');
+    setPendingNextGroupIndex(null);
   };
 
   const handlePreviousQuestion = () => {
@@ -600,6 +659,8 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     const answeredCount = node.questions.filter(q => answers.has(getAnswerKey(q.groupId, q.id))).length;
     const hasTimeLimit = node.timeLimit?.enabled && !node.timeLimit?.untimed;
     const timeLimitDisplay = hasTimeLimit ? `(${node.timeLimit?.minutes}m)` : '';
+    const hasBreak = node.breakAfter?.enabled;
+    const breakDisplay = hasBreak ? '☕' : '';
     
     return (
       <div key={node.id} style={{ marginBottom: '4px' }}>
@@ -617,7 +678,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontWeight: isActive ? 'bold' : 'normal', color: '#000000', fontSize: '13px' }}>
-              {node.name} {timeLimitDisplay}
+              {node.name} {timeLimitDisplay} {breakDisplay}
             </span>
             <span style={{ fontSize: '11px', color: '#666' }}>{answeredCount}/{node.totalQuestions}</span>
           </div>
@@ -653,6 +714,18 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     if (timeLeft === null) return 'No limit';
     return formatTimeDisplay(timeLeft);
   };
+
+  // Show break screen if needed
+  if (showBreakScreen && pendingBreakConfig) {
+    return (
+      <BreakScreen
+        breakConfig={pendingBreakConfig}
+        groupName={pendingGroupName}
+        groupPath={pendingGroupPath}
+        onContinue={handleBreakComplete}
+      />
+    );
+  }
 
   // Conditional returns
   if (loading) {
