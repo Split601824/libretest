@@ -60,7 +60,7 @@ interface BreakConfig {
 
 interface SubmitControl {
   mode: 'early' | 'auto-only' | 'after-time';
-  afterMinutes?: number;
+  minMinutes?: number;
 }
 
 interface GroupNode {
@@ -198,6 +198,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const [loading, setLoading] = useState(true);
   const [shuffledOptions, setShuffledOptions] = useState<Map<string, { options: string[]; fixedLetter?: string; fixedOption: string | null }>>(new Map());
   const [groupTimeRemaining, setGroupTimeRemaining] = useState<Map<string, number>>(new Map());
+  const [groupStartTime, setGroupStartTime] = useState<number | null>(null);
   
   // Break state
   const [showBreakScreen, setShowBreakScreen] = useState(false);
@@ -213,6 +214,15 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     }
     const examWithConditions = examData as Exam;
     return examWithConditions.conditions?.submitControl || { mode: 'early' };
+  };
+
+  // Get min minutes for time-locked submission
+  const getMinMinutesForGroup = (group: GroupInfo | null): number => {
+    const submitControl = getSubmitControlForGroup(group);
+    if (submitControl.mode === 'after-time' && submitControl.minMinutes) {
+      return submitControl.minMinutes;
+    }
+    return 0;
   };
 
   const getAnswerKey = (groupId: string, questionId: string) => `${groupId}_${questionId}`;
@@ -339,6 +349,15 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   const currentQuestion = currentGroup?.questions[currentQuestionIndex];
   const selectedAnswer = currentQuestion ? answers.get(getAnswerKey(currentGroup.id, currentQuestion.id)) : null;
   const currentSubmitControl = getSubmitControlForGroup(currentGroup);
+  const currentMinMinutes = getMinMinutesForGroup(currentGroup);
+
+  // Check if minimum time has been met
+  const isMinimumTimeMet = (): boolean => {
+    if (currentMinMinutes <= 0) return true;
+    if (groupStartTime === null) return false;
+    const elapsedSeconds = (Date.now() - groupStartTime) / 1000;
+    return elapsedSeconds >= currentMinMinutes * 60;
+  };
 
   // Check if current group has a break configured
   const shouldShowBreakAfterGroup = (group: GroupInfo): boolean => {
@@ -374,6 +393,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       setCurrentQuestionIndex(0);
       setGroupStarted(false);
       setTimeLeft(null);
+      setGroupStartTime(null);
     } else {
       // End of exam - submit
       saveResult();
@@ -407,6 +427,13 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     // Check if manual submit is allowed for current group
     if (currentSubmitControl.mode === 'auto-only') {
       alert('This section does not allow manual submission. The exam will advance automatically when the time expires.');
+      return;
+    }
+    
+    // For time-locked submission, check minimum time
+    if (currentSubmitControl.mode === 'after-time' && !isMinimumTimeMet()) {
+      const remainingMinutes = Math.ceil(currentMinMinutes - ((Date.now() - (groupStartTime || Date.now())) / 60000));
+      alert(`You must wait ${remainingMinutes} more minute(s) before submitting this section.`);
       return;
     }
     
@@ -485,7 +512,14 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         return;
       }
       
-      // For early mode, move to next group or break
+      // For after-time mode, check minimum time
+      if (currentSubmitControl.mode === 'after-time' && !isMinimumTimeMet()) {
+        const remainingMinutes = Math.ceil(currentMinMinutes - ((Date.now() - (groupStartTime || Date.now())) / 60000));
+        alert(`You must wait ${remainingMinutes} more minute(s) before finishing this section.`);
+        return;
+      }
+      
+      // For early mode or when minimum time is met, move to next group or break
       moveToNextGroupOrSubmit();
     }
   };
@@ -500,6 +534,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   };
 
   const handleGroupStart = () => {
+    setGroupStartTime(Date.now());
     setGroupStarted(true);
   };
 
@@ -515,6 +550,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
       setCurrentQuestionIndex(0);
       setGroupStarted(false);
       setTimeLeft(null);
+      setGroupStartTime(null);
       setPendingNextGroupIndex(null);
     } else if (pendingNextGroupIndex !== null && pendingNextGroupIndex >= groups.length) {
       saveResult();
@@ -651,6 +687,15 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     ? (showManualSubmitButton ? 'Submit Exam' : 'Complete')
     : 'Next →';
 
+  // Calculate elapsed time for minimum time display
+  const getElapsedTimeDisplay = () => {
+    if (groupStartTime === null || currentMinMinutes <= 0) return null;
+    const elapsedSeconds = (Date.now() - groupStartTime) / 1000;
+    const remainingSeconds = Math.max(0, currentMinMinutes * 60 - elapsedSeconds);
+    if (remainingSeconds <= 0) return null;
+    return formatTimeDisplay(remainingSeconds);
+  };
+
   // Break screen
   if (showBreakScreen && pendingBreakConfig) {
     return (
@@ -672,11 +717,19 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
     const timeDisplay = hasTimeLimit ? `${currentGroup.timeLimit?.minutes} minutes` : (currentGroup.timeLimit?.untimed ? 'Untimed' : 'No limit');
     
     // Show submission mode hint on group start screen
-    const submissionHint = currentSubmitControl.mode === 'auto-only' 
-      ? 'This section will auto-advance when time expires. You cannot manually submit.'
-      : (currentSubmitControl.mode === 'after-time' 
-        ? `This section will auto-advance after ${currentSubmitControl.afterMinutes} minutes of inactivity.`
-        : 'You may advance to the next section when finished.');
+    let submissionHint = '';
+    if (currentSubmitControl.mode === 'auto-only') {
+      submissionHint = 'This section will auto-advance when time expires. You cannot manually submit.';
+    } else if (currentSubmitControl.mode === 'after-time') {
+      if (currentMinMinutes > 0) {
+        const maxTime = hasTimeLimit ? `${currentGroup.timeLimit?.minutes} minutes` : 'the time limit';
+        submissionHint = `This section requires a minimum of ${currentMinMinutes} minutes. You can finish early after ${currentMinMinutes} minutes, or it will auto-submit when ${maxTime} expires.`;
+      } else {
+        submissionHint = 'This section will auto-advance when time expires.';
+      }
+    } else {
+      submissionHint = 'You may advance to the next section when finished.';
+    }
     
     return (
       <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
@@ -692,6 +745,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
             <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
               <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Format:</strong> {currentGroup.questions.length} questions, {totalGroupPoints} points</p>
               <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Time Limit:</strong> {timeDisplay}</p>
+              {currentMinMinutes > 0 && (
+                <p style={{ marginBottom: '8px', color: '#000000' }}><strong>Minimum Time Required:</strong> {currentMinMinutes} minutes</p>
+              )}
               <p style={{ marginBottom: '0', color: '#666666', fontSize: '12px' }}>{submissionHint}</p>
             </div>
             <button onClick={handleGroupStart} style={{ padding: '12px 24px', backgroundColor: '#00b000', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>Start {currentGroup.name}</button>
@@ -833,6 +889,9 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
   }
 
   // Main exam UI
+  const minTimeRemaining = getElapsedTimeDisplay();
+  const minTimeMet = isMinimumTimeMet();
+
   return (
     <div style={{ fontFamily: 'Roboto, sans-serif', backgroundColor: '#ffffff', minHeight: '100vh', color: '#000000' }}>
       {/* Top bar - green */}
@@ -841,11 +900,11 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           <div style={{ fontSize: '20px', color: '#ffffff' }}>
             <span style={{ fontWeight: 'bold' }}>LibreTest</span> Player
           </div>
-          <div style={{ fontSize: isWarning ? '20px' : '18px', fontWeight: 'bold', color: isWarning ? '#ff0000' : '#ffffff' }}>
-            {getTimeDisplay()}
+            <div style={{ fontSize: isWarning ? '20px' : '18px', fontWeight: 'bold', color: isWarning ? '#ff0000' : '#ffffff' }}>
+              {getTimeDisplay()}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Main content */}
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '40px 24px' }}>
@@ -860,7 +919,7 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
         </div>
         
         {/* Question text */}
-        <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', lineHeight: '1.4', color: '#000000' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'Roboto, sans-serif', marginBottom: '24px', lineHeight: '1.4', color: '#000000' }}>
           {currentQuestion.text}
         </h2>
 
@@ -992,11 +1051,23 @@ export function ExamPlayer({ exam, onComplete }: ExamPlayerProps) {
           </button>
         </div>
         
-        {/* Auto-only submission notice */}
+        {/* Submission notices */}
         {currentSubmitControl.mode === 'auto-only' && (
           <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#ff9800' }}>
             ⏱️ This section will auto-advance when the timer expires.
             {isLastQuestion && ' The exam will submit automatically.'}
+          </div>
+        )}
+        
+        {currentSubmitControl.mode === 'after-time' && !minTimeMet && currentMinMinutes > 0 && (
+          <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#ff9800' }}>
+            ⏱️ Minimum time required: {Math.ceil((currentMinMinutes * 60 - ((Date.now() - (groupStartTime || Date.now())) / 1000)) / 60)} minute(s) remaining before you can finish this section.
+          </div>
+        )}
+        
+        {currentSubmitControl.mode === 'after-time' && minTimeMet && (
+          <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#4caf50' }}>
+            ✓ Minimum time requirement met. You may now finish this section.
           </div>
         )}
       </div>
